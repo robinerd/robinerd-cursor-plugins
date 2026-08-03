@@ -1,0 +1,18 @@
+﻿{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "command": "node \"${CURSOR_PLUGIN_ROOT}/scripts/protect-config.mjs\"",
+        "matcher": "Write|StrReplace|Delete|EditNotebook",
+        "failClosed": false
+      }
+    ],
+    "beforeShellExecution": [
+      {
+        "command": "node \"${CURSOR_PLUGIN_ROOT}/scripts/protect-config.mjs\"",
+        "failClosed": false
+      }
+    ]
+  }
+}

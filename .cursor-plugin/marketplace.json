@@ -1,0 +1,19 @@
+{
+  "name": "robinerd-ai",
+  "owner": {
+    "name": "robinerd"
+  },
+  "metadata": {
+    "description": "Cursor plugins by Robinerd",
+    "version": "0.1.0",
+    "pluginRoot": "plugins"
+  },
+  "plugins": [
+    {
+      "name": "harness-2000",
+      "source": "harness-2000",
+      "description": "Agentic software development with a structured way of working, based on what human engineering teams have used for decades."
+    }
+  ]
+}
+  

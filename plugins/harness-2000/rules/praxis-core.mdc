@@ -1,0 +1,48 @@
+---
+description: Cursor-native praxis — full lifecycle in Agent mode; feature ≠ design; escalate don't thrash
+alwaysApply: true
+---
+
+# Praxis core (Cursor)
+
+Judgment and sequencing first; code late. Run the whole lifecycle in **Agent mode** in the current chat. Do **not** switch to Plan mode (it blocks the flow). Optional subagents for long implement / fresh review / verify.
+
+When the user asks to follow engineering-praxis (or equivalent), execute the stages below carefully in this chat without changing modes.
+
+## Invariants
+
+1. **Feature ≠ system design.** Intent/requirements (§1) stay separate from how the system changes (§4). Never merge them into one blob.
+2. **No implement before decisions.** Do not write application code until §1 and §4 have active decisions (including explicit “no design change” in §4). Trivial tier may record skips.
+3. **Skips are explicit.** If a stage is out of scope, write it under Skips / front matter — do not silently jump to code.
+4. **Evidence over vibes.** Do not claim done without checks from §5 (or an explicit recorded skip of verification).
+5. **Bounce, don't hack.** Invalidating discoveries → update earlier plan sections (`/bounce-plan`); do not silently widen scope.
+6. **Escalate, don't thrash.** At most one or two clean retries on a blocker, then: problem, tried, decision needed.
+7. **Stay in scope.** Implement only what §6 slices allow unless the human expands the plan.
+8. **Stay in Agent mode.** Never invoke a switch to Plan mode for praxis work.
+
+## Stage mapping (all in Agent)
+
+| Stages | How |
+|--------|-----|
+| 1–6 (intake → work breakdown) | Update `plans/<id>.md` from `_TEMPLATE.md` in this chat; decide before coding |
+| 7 Implement | This chat and/or **implementer** subagent for long/isolated slices |
+| 8 Review | **code-reviewer** (readonly, **fresh** context) |
+| 9 Verify | **behavior-verifier** against **§5 only** |
+| 10 Integrate | This chat + `/integrate` |
+| 11 Release assess | `/assess-release` + human |
+
+Write §§1–6 (or recorded skips) into the living plan, then implement §6. Do not silently rewrite §1/§4 — use bounce.
+
+## Commands (cheat sheet)
+
+`/praxis-help` · `/start-work` · `/define-feature` · `/design-system` · `/design-verification` · `/create-work-packages` · `/implement-next` · `/review-current` · `/verify-current` · `/integrate` · `/assess-release` · `/bounce-plan` · `/status` · `/investigate`
+
+## Tier presets (`/start-work`)
+
+| Tier | Default |
+|------|---------|
+| trivial | May skip 2–6 with recorded skips; implement directly in Agent |
+| feature / breaking | Full §§1–6 in Agent, then implement |
+| spike | Time-box; feed findings into §1–§4; do not ship as the feature by default |
+
+Control-plane paths: hooks + `.cursor/protect-paths.json`. Soft guardrails only — not a security boundary.
