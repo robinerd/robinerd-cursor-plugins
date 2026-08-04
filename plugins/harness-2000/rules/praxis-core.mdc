@@ -1,13 +1,13 @@
 ---
-description: Cursor-native praxis — full lifecycle in Agent mode; feature ≠ design; escalate don't thrash
+description: Cursor-native praxis — full lifecycle in Agent mode; feature ≠ design; AskQuestion clarifications; subagent slices
 alwaysApply: true
 ---
 
 # Praxis core (Cursor)
 
-Judgment and sequencing first; code late. Run the whole lifecycle in **Agent mode** in the current chat. Do **not** switch to Plan mode (it blocks the flow). Optional subagents for long implement / fresh review / verify.
+Judgment and sequencing first; code late. Run the whole lifecycle in **Agent mode** in the current chat. Do **not** switch to Plan mode (no `SwitchMode` → plan). Use interactive questions and scoped subagents instead.
 
-When the user asks to follow engineering-praxis (or equivalent), execute the stages below carefully in this chat without changing modes.
+When the user asks to follow harness-2000 / praxis (or equivalent), execute the stages below carefully in this chat without changing modes.
 
 ## Invariants
 
@@ -18,31 +18,45 @@ When the user asks to follow engineering-praxis (or equivalent), execute the sta
 5. **Bounce, don't hack.** Invalidating discoveries → update earlier plan sections (`/bounce-plan`); do not silently widen scope.
 6. **Escalate, don't thrash.** At most one or two clean retries on a blocker, then: problem, tried, decision needed.
 7. **Stay in scope.** Implement only what §6 slices allow unless the human expands the plan.
-8. **Stay in Agent mode.** Never invoke a switch to Plan mode for praxis work.
+8. **Stay in Agent mode.** Never invoke a switch to Plan mode for praxis work. Planning/design happens in this chat via the living plan + `/ask-user`.
+9. **Clarify interactively.** For decisions that change plan output or gates, use **ask-user** / `AskQuestion` (multi-choice + `Custom: …`). Fallback to the same options in prose if the tool is missing.
+10. **Human gate before coding.** Before each implementation slice, get approval — or a recorded **mass-approve all remaining slices**. See `/ask-user` slice gate.
+11. **Scoped subagents for implement.** One §6 slice per **implementer** subagent; then fresh **code-reviewer**; then **behavior-verifier** against §5 (slice-relevant). Main chat orchestrates, keeps the plan, and handles human checks — it should not absorb long implement diffs into its own context when a subagent can.
+
+## Plugin asset resolution
+
+Bundled files live under the **harness-2000 plugin install root** (directory with `.cursor-plugin/plugin.json`), not the consumer project.
+
+| Asset | Resolve |
+|-------|---------|
+| Plan template | `${CURSOR_PLUGIN_ROOT}/templates/plans/_TEMPLATE.md`, or from any skill dir `../../templates/plans/_TEMPLATE.md` |
+| Protect hook script | `${CURSOR_PLUGIN_ROOT}/scripts/protect-config.mjs` (hooks.json already) |
+
+Never assume workspace paths like `plugins/harness-2000/…`. Consumer plans stay at project `plans/<id>.md`.
 
 ## Stage mapping (all in Agent)
 
 | Stages | How |
 |--------|-----|
-| 1–6 (intake → work breakdown) | Update `plans/<id>.md` from `_TEMPLATE.md` in this chat; decide before coding |
-| 7 Implement | This chat and/or **implementer** subagent for long/isolated slices |
-| 8 Review | **code-reviewer** (readonly, **fresh** context) |
-| 9 Verify | **behavior-verifier** against **§5 only** |
+| 1–6 (intake → work breakdown) | Update `plans/<id>.md` from template in this chat; **ask-user** for clarifications; decide before coding |
+| 7 Implement | **implementer** subagent, **one approved slice at a time**; main chat only if trivial + user said so |
+| 8 Review | **code-reviewer** (readonly, **fresh** context) after each slice |
+| 9 Verify | **behavior-verifier** against **§5** (slice-relevant); human check when §6 marks human or risk is high |
 | 10 Integrate | This chat + `/integrate` |
 | 11 Release assess | `/assess-release` + human |
 
-Write §§1–6 (or recorded skips) into the living plan, then implement §6. Do not silently rewrite §1/§4 — use bounce.
+Write §§1–6 (or recorded skips) into the living plan, then implement §6 under the approval gate. Do not silently rewrite §1/§4 — use bounce.
 
 ## Commands (cheat sheet)
 
-`/praxis-help` · `/start-work` · `/define-feature` · `/design-system` · `/design-verification` · `/create-work-packages` · `/implement-next` · `/review-current` · `/verify-current` · `/integrate` · `/assess-release` · `/bounce-plan` · `/status` · `/investigate`
+`/praxis-help` · `/start-work` · `/ask-user` · `/define-feature` · `/design-system` · `/design-verification` · `/create-work-packages` · `/implement-next` · `/review-current` · `/verify-current` · `/integrate` · `/assess-release` · `/bounce-plan` · `/status` · `/investigate`
 
 ## Tier presets (`/start-work`)
 
 | Tier | Default |
 |------|---------|
-| trivial | May skip 2–6 with recorded skips; implement directly in Agent |
-| feature / breaking | Full §§1–6 in Agent, then implement |
+| trivial | May skip 2–6 with recorded skips; implement in Agent (subagent optional if tiny) |
+| feature / breaking | Full §§1–6 in Agent, then gated subagent slices |
 | spike | Time-box; feed findings into §1–§4; do not ship as the feature by default |
 
 Control-plane paths: hooks + `.cursor/protect-paths.json`. Soft guardrails only — not a security boundary.

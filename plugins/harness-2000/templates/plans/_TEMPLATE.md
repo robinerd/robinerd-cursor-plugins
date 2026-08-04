@@ -68,6 +68,7 @@ Filled or refined when moving from §§1–6 decisions into implementation (stil
 - Approach / sequence.
 - Key files or modules (expected).
 - Bounce triggers → update §4 (or earlier) if reality diverges.
+- **Approvals:** per-slice | mass-approve remaining (record choice + slice ids). One implementer subagent per slice; review + verify between slices.
 
 ## 8. Verification record
 

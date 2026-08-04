@@ -1,6 +1,6 @@
 # Harness 2000 (Cursor plugin)
 
-Cursor-native full lifecycle in **Agent mode**: judgment (§§1–6) then implement, fresh **code-reviewer** / **behavior-verifier**, slash commands for stage transitions, soft protect hooks. Does **not** switch to Plan mode.
+Cursor-native full lifecycle in **Agent mode**: judgment (§§1–6) then gated implement, fresh **code-reviewer** / **behavior-verifier**, slash commands for stage transitions, soft protect hooks. Does **not** switch to Plan mode — clarifications use `/ask-user` (`AskQuestion` + `Custom: …`).
 
 ## Install
 
@@ -20,20 +20,33 @@ Do **not** junction/symlink from outside `plugins/local` — Cursor rejects exte
 
 ```text
 Agent (same chat): intake → feature (§1) → priority → design (§4) → verify-design (§5) → breakdown (§6)
-                 → implement → (subagent) review → (subagent) verify vs §5 → integrate → gate
+                 → ask-user gate (slice | mass-approve)
+                 → implementer (1 slice) → code-reviewer → behavior-verifier → (human if needed) → next slice…
+                 → integrate → gate
 ```
 
-§1 and §4 stay distinct. Skips are recorded on the plan front matter. Stay in Agent mode throughout.
+§1 and §4 stay distinct. Skips are recorded on the plan front matter. Stay in Agent mode throughout. Subagents keep implement/review/verify context scoped so the main chat can orchestrate long feedback cycles.
 
 Example prompt shape:
 
-> Implement the below request, following the harness-2000 / praxis steps carefully. Do not switch to plan mode though, do the same steps inside the current chat agent mode.
+> Implement the below request, following the harness-2000 / praxis steps carefully. Stay in agent mode (do not switch to plan mode). Use interactive questions when you need decisions.
 >
 > \<your request\>
 
 ## Commands
 
-`/praxis-help` `/start-work` `/define-feature` `/design-system` `/design-verification` `/create-work-packages` `/implement-next` `/review-current` `/verify-current` `/integrate` `/assess-release` `/bounce-plan` `/status` `/investigate`
+`/praxis-help` `/start-work` `/ask-user` `/define-feature` `/design-system` `/design-verification` `/create-work-packages` `/implement-next` `/review-current` `/verify-current` `/integrate` `/assess-release` `/bounce-plan` `/status` `/investigate`
+
+## Plugin paths (when installed)
+
+Bundled assets resolve from the **plugin install root**, not the consumer project cwd:
+
+| Asset | Path |
+|-------|------|
+| Plan template | `${CURSOR_PLUGIN_ROOT}/templates/plans/_TEMPLATE.md` or `../../templates/plans/_TEMPLATE.md` from any `skills/<name>/` |
+| Protect script | `${CURSOR_PLUGIN_ROOT}/scripts/protect-config.mjs` (already wired in `hooks/hooks.json`) |
+
+Consumer initiative docs stay at workspace `plans/<id>.md`.
 
 ## Layout
 
@@ -41,13 +54,11 @@ Example prompt shape:
 .cursor-plugin/plugin.json   # required manifest
 rules/praxis-core.mdc
 agents/{implementer,code-reviewer,behavior-verifier}.md
-skills/…
+skills/…                     # includes ask-user, bootstrap-plans, …
 commands/…
 hooks/ + scripts/protect-config.mjs
 templates/plans/_TEMPLATE.md
 ```
-
-Plugin hooks resolve the protect script via `${CURSOR_PLUGIN_ROOT}/scripts/protect-config.mjs` (required because plugin hook cwd is the project root).
 
 ## Consumer repo policy
 
