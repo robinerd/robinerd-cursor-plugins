@@ -30,7 +30,8 @@ Override for tests / local runs:
 1. Point Cursor at the **repository root** (`robinerd-cursor-plugins` — folder with `.cursor-plugin/marketplace.json`).
 2. Enable **Harness Board** beside **Harness 2000**, then reload if needed.
 3. Confirm MCP tools under **Settings → Tools & MCP** (`harness-board`: `board_get`, `list_slices`, transition tools).
-4. Run `npm install` once inside `plugins/harness-board` so `@modelcontextprotocol/sdk` is available when Cursor spawns `node …/bin/mcp.js`.
+
+On first MCP connect, `bin/mcp.js` runs `npm install --omit=dev` into the plugin install/cache directory if `@modelcontextprotocol/sdk` is missing (Cursor does not ship `node_modules` with plugins). Install logs go to stderr only so stdio MCP stays clean.
 
 ### MCP enable
 
