@@ -33,6 +33,8 @@ Override for tests / local runs:
 
 On first MCP connect, `bin/mcp.js` runs `npm install --omit=dev` into the plugin install/cache directory if `@modelcontextprotocol/sdk` is missing (Cursor does not ship `node_modules` with plugins). Install logs go to stderr only so stdio MCP stays clean.
 
+If Cursor leaves `${workspaceFolder}` unexpanded in MCP env, the server falls back to `process.cwd()` so the store is not keyed under a literal `${…}` path.
+
 ### MCP enable
 
 Plugin root `mcp.json` is auto-discovered. It starts:

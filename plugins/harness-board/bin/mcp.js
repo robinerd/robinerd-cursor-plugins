@@ -6,7 +6,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const pluginRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -50,14 +50,20 @@ ensureDeps();
 const { StdioServerTransport } = await import(
   "@modelcontextprotocol/sdk/server/stdio.js"
 );
-const { createHarnessBoardMcpServer } = await import("../lib/mcp.js");
+const {
+  createHarnessBoardMcpServer,
+  isUnexpandedTemplate,
+  sanitizeWorkspacePath,
+} = await import("../lib/mcp.js");
 
-const workspacePath = resolve(
-  process.env.HARNESS_BOARD_WORKSPACE || process.cwd(),
+const workspacePath = sanitizeWorkspacePath(
+  process.env.HARNESS_BOARD_WORKSPACE,
 );
-const dataRoot = process.env.HARNESS_BOARD_DATA_ROOT
-  ? resolve(process.env.HARNESS_BOARD_DATA_ROOT)
-  : undefined;
+const dataRootEnv = process.env.HARNESS_BOARD_DATA_ROOT;
+const dataRoot =
+  dataRootEnv && !isUnexpandedTemplate(dataRootEnv)
+    ? sanitizeWorkspacePath(dataRootEnv)
+    : undefined;
 
 const server = createHarnessBoardMcpServer({ workspacePath, dataRoot });
 const transport = new StdioServerTransport();

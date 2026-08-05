@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getState } from "./store.js";
@@ -58,19 +59,45 @@ function textResult(payload, isError = false) {
 }
 
 /**
+ * True when Cursor left a template unexpanded (e.g. literal `${workspaceFolder}`).
+ * @param {string} value
+ */
+export function isUnexpandedTemplate(value) {
+  return /\$\{[^}]+\}/.test(value);
+}
+
+/**
+ * Pick a usable workspace path. Plugin MCP env sometimes ships the literal
+ * `${workspaceFolder}` string; never use that as a store key.
+ * @param {string | undefined} candidate
+ * @param {string} [fallback]
+ */
+export function sanitizeWorkspacePath(candidate, fallback = process.cwd()) {
+  if (!candidate || typeof candidate !== "string") {
+    return resolve(fallback);
+  }
+  const trimmed = candidate.trim();
+  if (!trimmed || isUnexpandedTemplate(trimmed)) {
+    return resolve(fallback);
+  }
+  return resolve(trimmed);
+}
+
+/**
  * Resolve workspace + optional data root from env (or overrides).
  * @param {{ workspacePath?: string, dataRoot?: string }} [overrides]
  */
 export function resolveBoardEnv(overrides = {}) {
-  const workspacePath =
-    overrides.workspacePath ??
-    process.env.HARNESS_BOARD_WORKSPACE ??
-    process.cwd();
-  const dataRoot =
+  const workspacePath = sanitizeWorkspacePath(
+    overrides.workspacePath ?? process.env.HARNESS_BOARD_WORKSPACE,
+  );
+  const dataRootRaw =
     overrides.dataRoot ?? process.env.HARNESS_BOARD_DATA_ROOT ?? undefined;
   /** @type {StoreOptions} */
   const storeOptions = {};
-  if (dataRoot) storeOptions.dataRoot = dataRoot;
+  if (dataRootRaw && !isUnexpandedTemplate(dataRootRaw)) {
+    storeOptions.dataRoot = resolve(dataRootRaw);
+  }
   return { workspacePath, storeOptions };
 }
 

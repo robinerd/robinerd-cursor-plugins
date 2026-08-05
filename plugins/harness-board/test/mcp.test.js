@@ -144,3 +144,25 @@ test("tool name binds role: args.action cannot override tool name", async () => 
     await rm(dataRoot, { recursive: true, force: true });
   }
 });
+
+test("sanitizeWorkspacePath rejects unexpanded ${workspaceFolder}", async () => {
+  const { resolve } = await import("node:path");
+  const { isUnexpandedTemplate, sanitizeWorkspacePath } = await import(
+    "../lib/mcp.js"
+  );
+  assert.equal(isUnexpandedTemplate("${workspaceFolder}"), true);
+  assert.equal(
+    isUnexpandedTemplate("C:\\Users\\robin\\${workspaceFolder}"),
+    true,
+  );
+  assert.equal(isUnexpandedTemplate("D:\\robinerd-cursor-plugins"), false);
+  const fallback = "D:\\robinerd-cursor-plugins";
+  assert.equal(
+    sanitizeWorkspacePath("${workspaceFolder}", fallback),
+    resolve(fallback),
+  );
+  assert.equal(
+    sanitizeWorkspacePath("C:\\Users\\robin\\${workspaceFolder}", fallback),
+    resolve(fallback),
+  );
+});
