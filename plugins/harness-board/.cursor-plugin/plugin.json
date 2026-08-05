@@ -1,0 +1,11 @@
+{
+  "name": "harness-board",
+  "displayName": "Harness Board",
+  "version": "0.1.0",
+  "description": "View-only local kanban for praxis slice workflow. Persists board state outside the repo; agents advance slices via named MCP transition tools.",
+  "author": {
+    "name": "robinerd"
+  },
+  "license": "MIT",
+  "keywords": ["praxis", "kanban", "harness", "slices", "cursor", "board", "workflow"]
+}

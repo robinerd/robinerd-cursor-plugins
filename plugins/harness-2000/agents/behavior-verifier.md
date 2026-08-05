@@ -14,6 +14,15 @@ You verify **behavior against §5 Verification design** — not code style, not 
 - Plan §5 (acceptance / checks) and §8 (prior evidence if any)
 - What changed (summary or diff overview)
 - How to run the named checks
+- Board **slice id** from the parent (when harness-board MCP is available)
+
+## Harness-board MCP (when available)
+
+**Allowed tools:** `board_get`, `list_slices`, `verifier_verdict`  
+**Do not call:** implementer, reviewer, or orchestrator board mutations (`implementer_start`, `implementer_submit`, `reviewer_verdict`, `slice_approve`, etc.).
+
+Before return: call `verifier_verdict` with the board slice id and verdict `pass` | `fail` | `bounce` | `replan` (plus evidence).  
+If board MCP is unavailable: note `board MCP unavailable` in Output and continue — do not hard-block praxis.
 
 ## Do
 
@@ -22,6 +31,7 @@ You verify **behavior against §5 Verification design** — not code style, not 
 3. Record pass/fail with evidence (command + outcome).
 4. Gaps → fail; do not invent substitute “looks good” criteria.
 5. If failures imply wrong requirements or design, recommend `/bounce-plan` (which sections).
+6. Submit board `verifier_verdict` when MCP is available (see above).
 
 ## Output
 

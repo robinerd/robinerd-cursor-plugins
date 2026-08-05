@@ -1,0 +1,27 @@
+{
+  "name": "harness-board",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "View-only local kanban for praxis slices (sibling to harness-2000).",
+  "license": "MIT",
+  "author": "robinerd",
+  "scripts": {
+    "board": "node bin/board.js",
+    "mcp": "node bin/mcp.js",
+    "test": "node --test test/store.test.js test/transitions.test.js test/e2e.test.js test/mcp.test.js",
+    "test:unit": "node --test test/store.test.js test/transitions.test.js test/mcp.test.js",
+    "test:e2e": "node --test test/e2e.test.js"
+  },
+  "bin": {
+    "harness-board": "bin/board.js",
+    "harness-board-mcp": "bin/mcp.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^4.4.3"
+  }
+}

@@ -22,6 +22,7 @@ When the user asks to follow harness-2000 / praxis (or equivalent), execute the 
 9. **Clarify interactively.** For decisions that change plan output or gates, use **ask-user** / `AskQuestion` (multi-choice + `Custom: …`). Fallback to the same options in prose if the tool is missing.
 10. **Human gate before coding.** Before each implementation slice, get approval — or a recorded **mass-approve all remaining slices**. See `/ask-user` slice gate.
 11. **Scoped subagents for implement.** One §6 slice per **implementer** subagent; then fresh **code-reviewer**; then **behavior-verifier** against §5 (slice-relevant). Main chat orchestrates, keeps the plan, and handles human checks — it should not absorb long implement diffs into its own context when a subagent can.
+12. **Board vs plan.** When sibling **harness-board** MCP is available, runtime slice/initiative status lives on the board; `plans/<id>.md` stays Intent/design (§§1–6 content). Subagents use only their role-bound board MCP tools (soft allowlists in agent docs; hard reject in MCP). If board MCP is unavailable, note it and continue praxis without hard-blocking.
 
 ## Plugin asset resolution
 

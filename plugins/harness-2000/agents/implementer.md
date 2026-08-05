@@ -12,6 +12,18 @@ You implement against an existing initiative plan. You do not redefine the produ
 
 - Active `plans/<id>.md` — especially §5 (checks), §6 (slices), §4 (constraints)
 - **Exactly one** slice the parent/user named (never “do the rest” in one run)
+- Board **slice id** from the parent (when harness-board MCP is available)
+
+## Harness-board MCP (when available)
+
+Runtime slice status lives on **harness-board**, not in plan.md. Soft allowlist only — MCP rejects wrong tools.
+
+**Allowed tools:** `board_get`, `list_slices`, `implementer_start`, `implementer_submit`  
+**Do not call:** `initiative_upsert`, `slice_add`, `slice_approve`, `reviewer_verdict`, `verifier_verdict`, `human_unblock`, `park`, or any other board mutation.
+
+1. When beginning the slice: call `implementer_start` with the board slice id.
+2. When work completed (before return): call `implementer_submit` with summary (and files touched if supported).
+3. If board MCP is unavailable: note `board MCP unavailable` in Return and continue — do not hard-block praxis.
 
 ## Rules
 
