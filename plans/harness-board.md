@@ -1,17 +1,18 @@
 # Initiative: harness-board
 
-Status: active  
+Status: done  
 Tier: feature  
 Stage: 11-gate  
 Skips: _(none)_  
-Last updated: 2026-08-05  
+Last updated: 2026-08-06  
 §1: locked (2026-08-05)  
 §4: locked (2026-08-05)  
 §5: locked (2026-08-05)  
 §6: locked (2026-08-05) — slices S1–S6  
 Approvals: mass-approve S1–S6 (2026-08-05)  
-Current slice: S6 done — awaiting release gate  
-S1–S6: all review approve + verify verified (2026-08-05)
+Current slice: all done  
+S1–S6: all review approve + verify verified (2026-08-05)  
+Gate: accept (2026-08-06) — live MCP smoke confirmed
 
 Living document — update in place when later work changes earlier conclusions.  
 **§1 Intent (feature) and §4 System design stay distinct — never merge.**
@@ -191,11 +192,11 @@ Ordered slices — one implementer subagent each. Review + verify (§5) between 
 - **S2:** verified — transition table. Review: approve.
 - **S3:** verified — random port UI; API happy path; `move_card`→400. Review: approve.
 - **S4:** verified — e2e drive happy+illegal+HTML+persist. Review: approve.
-- **S5:** verified — MCP named tools; role-bind fix; `npm test` **37/37**. Review: approve (after revise). Manual: enable plugin + live MCP call remaining.
+- **S5:** verified — MCP named tools; role-bind fix; `npm test` **37/37**. Review: approve (after revise). **Live MCP (2026-08-06):** `initiative_upsert` + `slice_add` succeeded in Cursor.
 - **S6:** verified — harness-2000 docs wire role tools + soft-fail; board still 37/37. Review: approve.
 
 ## Gate (stage 11)
 
-- **Agent recommendation:** **accept** after human confirms live MCP smoke (enable harness-board, one `board_get` or upsert).
-- **Decision:** _(awaiting human)_ accept | revise | replan | escalate | abandon  
-- **Notes:** Intent met (sibling plugin, enforced transitions, view-only UI, harness wiring). §5 automated depth met; live Cursor MCP is the remaining smoke.
+- **Agent recommendation:** **accept**
+- **Decision:** **accept** (2026-08-06) — human confirmed MCP installed; live `initiative_upsert` + `slice_add` succeeded in session.
+- **Notes:** Intent met (sibling plugin, enforced transitions, view-only UI, harness wiring). §5 automated + live MCP smoke. Bootstrap commit `209a3c3` on origin.
