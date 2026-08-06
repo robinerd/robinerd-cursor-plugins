@@ -6,7 +6,7 @@ Agents advance cards only via **named MCP tools** (tool name binds role). There 
 
 ## Status
 
-v0.1: JSON store, transition engine, local HTTP board (`npm run board`), and stdio MCP (`mcp.json`).
+v0.1.4: JSON store, transition engine, multi-board local HTTP UI (`npm run board`), and stdio MCP (`mcp.json`).
 
 ## Persist path
 
@@ -22,8 +22,14 @@ Override for tests / local runs:
 
 | Env | Purpose |
 |-----|---------|
-| `HARNESS_BOARD_WORKSPACE` | Workspace path used as store key (default: `cwd`) |
+| `HARNESS_BOARD_WORKSPACE` | Optional default workspace for UI / actions (UI no longer requires this) |
 | `HARNESS_BOARD_DATA_ROOT` | Root instead of `~/.cursor/harness-board` |
+
+## Board UI (`npm run board`)
+
+No env vars required for the UI. The page shows a **left sidebar** of every board under `~/.cursor/harness-board/*/state.json`, ordered by `state.json` mtime (newest first). Click a board to load it (`/?workspace=…`). The UI polls `/api/boards` and reloads when the selected board’s mtime changes, or when `active-workspace` points at a different board (auto-follow).
+
+MCP still resolves the store via `HARNESS_BOARD_WORKSPACE` / `${workspaceFolder}` and the `active-workspace.txt` pointer — separate from opening the UI.
 
 ## Install
 
@@ -33,7 +39,7 @@ Override for tests / local runs:
 
 On first MCP connect, `bin/mcp.js` runs `npm install --omit=dev` into the plugin install/cache directory if `@modelcontextprotocol/sdk` is missing (Cursor does not ship `node_modules` with plugins). Install logs go to stderr only so stdio MCP stays clean.
 
-If Cursor leaves `${workspaceFolder}` unexpanded in MCP env, the server falls back to `process.cwd()` so the store is not keyed under a literal `${…}` path.
+If Cursor leaves `${workspaceFolder}` unexpanded in MCP env, the server falls back to the remembered active workspace / `process.cwd()` so the store is not keyed under a literal `${…}` path.
 
 ### MCP enable
 
@@ -55,8 +61,8 @@ UI remains separate: open the board with `npm run board` (not an MCP tool).
 
 | Command | Purpose |
 |---------|---------|
-| `npm test` | Store + transition + e2e + MCP smoke tests |
-| `npm run board` | Local board server (random port, prints URL) |
+| `npm test` | Store + transition + boards + e2e + MCP smoke tests |
+| `npm run board` | Local multi-board server (random port, prints URL; no workspace env required) |
 | `npm run mcp` | stdio MCP server (Cursor launches this via `mcp.json`) |
 
 ## HTTP API
@@ -65,9 +71,11 @@ Server binds `127.0.0.1` on a free port and logs `http://127.0.0.1:<port>`.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `GET` | `/` | View-only board HTML |
-| `GET` | `/api/state` | Current board JSON |
-| `POST` | `/api/action` | Named transition: `{ "action": "…", … }` |
+| `GET` | `/` | Multi-board HTML (sidebar + selected board); `?workspace=` / `?hash=` |
+| `GET` | `/api/boards` | `{ boards, selectedWorkspace, activeWorkspace }` |
+| `GET` | `/api/state` | Board JSON for `?workspace=` / `?hash=` (or selected default) |
+| `POST` | `/api/select` | `{ "workspace": "…" }` — remember active workspace |
+| `POST` | `/api/action` | Named transition: `{ "action": "…", "workspace"?: "…", … }` |
 
 ## MCP tools
 
@@ -97,7 +105,9 @@ bin/board.js          # npm run board
 bin/mcp.js            # stdio MCP entry
 lib/store.js
 lib/transitions.js
-lib/server.js         # HTTP + dispatchAction + view-only HTML
+lib/boards.js         # list / resolve multi-board
+lib/workspace.js      # active-workspace pointer
+lib/server.js         # HTTP + dispatchAction + multi-board HTML
 lib/mcp.js            # MCP tools → shared engine
 test/
 ```

@@ -1,11 +1,22 @@
-import { resolve, join } from "node:path";
-import { homedir } from "node:os";
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { resolve } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { defaultDataRoot, getState } from "./store.js";
+import { getState } from "./store.js";
 import { dispatchAction } from "./server.js";
 import { ACTIONS, TransitionError } from "./transitions.js";
+import {
+  isUnexpandedTemplate,
+  rememberActiveWorkspace,
+  readActiveWorkspace,
+  sanitizeWorkspacePath,
+} from "./workspace.js";
+
+export {
+  isUnexpandedTemplate,
+  rememberActiveWorkspace,
+  readActiveWorkspace,
+  sanitizeWorkspacePath,
+} from "./workspace.js";
 
 /** @typedef {import("./store.js").StoreOptions} StoreOptions */
 
@@ -58,93 +69,6 @@ function textResult(payload, isError = false) {
       },
     ],
   };
-}
-
-/**
- * True when Cursor left a template unexpanded (e.g. literal `${workspaceFolder}`).
- * @param {string} value
- */
-export function isUnexpandedTemplate(value) {
-  return /\$\{[^}]+\}/.test(value);
-}
-
-/**
- * @param {string} [dataRoot]
- * @returns {string}
- */
-function activeWorkspacePath(dataRoot) {
-  return join(defaultDataRoot(dataRoot), "active-workspace.txt");
-}
-
-/**
- * Remember last good workspace so MCP can recover when Cursor leaves
- * `${workspaceFolder}` unexpanded and process.cwd() is $HOME.
- * @param {string} workspacePath
- * @param {string} [dataRoot]
- */
-export function rememberActiveWorkspace(workspacePath, dataRoot) {
-  if (!workspacePath || isUnexpandedTemplate(workspacePath)) return;
-  const resolved = resolve(workspacePath);
-  if (resolved === resolve(homedir())) return;
-  try {
-    const root = defaultDataRoot(dataRoot);
-    mkdirSync(root, { recursive: true });
-    writeFileSync(activeWorkspacePath(dataRoot), resolved, "utf8");
-  } catch {
-    // best-effort pointer only
-  }
-}
-
-/**
- * @param {string} [dataRoot]
- * @returns {string | undefined}
- */
-export function readActiveWorkspace(dataRoot) {
-  try {
-    const raw = readFileSync(activeWorkspacePath(dataRoot), "utf8").trim();
-    if (!raw || isUnexpandedTemplate(raw)) return undefined;
-    return resolve(raw);
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * Pick a usable workspace path. Plugin MCP env sometimes ships the literal
- * `${workspaceFolder}` string; never use that as a store key.
- * @param {string | undefined} candidate
- * @param {string} [fallback]
- * @param {string} [dataRoot]
- */
-export function sanitizeWorkspacePath(
-  candidate,
-  fallback = process.cwd(),
-  dataRoot,
-) {
-  const home = resolve(homedir());
-  const remembered = readActiveWorkspace(dataRoot);
-
-  if (candidate && typeof candidate === "string") {
-    const trimmed = candidate.trim();
-    if (trimmed && !isUnexpandedTemplate(trimmed)) {
-      const resolved = resolve(trimmed);
-      if (resolved !== home) {
-        rememberActiveWorkspace(resolved, dataRoot);
-        return resolved;
-      }
-    }
-  }
-
-  if (remembered) return remembered;
-
-  const fb = resolve(fallback);
-  if (fb !== home) {
-    rememberActiveWorkspace(fb, dataRoot);
-    return fb;
-  }
-
-  // Last resort — still prefer remembered if any; else home (empty board).
-  return remembered ?? fb;
 }
 
 /**

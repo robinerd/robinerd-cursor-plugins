@@ -1,6 +1,14 @@
 import http from "node:http";
 import { getState } from "./store.js";
 import {
+  listBoardSummaries,
+  resolveSelectedWorkspace,
+} from "./boards.js";
+import {
+  readActiveWorkspace,
+  rememberActiveWorkspace,
+} from "./workspace.js";
+import {
   ACTIONS,
   SLICE_COLUMNS,
   TransitionError,
@@ -17,6 +25,7 @@ import {
 
 /** @typedef {import("./store.js").BoardState} BoardState */
 /** @typedef {import("./store.js").StoreOptions} StoreOptions */
+/** @typedef {import("./boards.js").BoardSummary} BoardSummary */
 
 const INITIATIVE_STATUS_LABELS = Object.freeze({
   planning: "Planning",
@@ -38,7 +47,7 @@ const COLUMN_LABELS = Object.freeze({
 
 /**
  * @typedef {object} BoardServerOptions
- * @property {string} workspacePath
+ * @property {string} [workspacePath] Optional default workspace (e2e / HARNESS_BOARD_WORKSPACE).
  * @property {string} [dataRoot]
  * @property {string} [host]
  */
@@ -246,43 +255,63 @@ function escapeHtml(value) {
 }
 
 /**
- * View-only board HTML (no mutation controls).
+ * @param {string | null | undefined} path
+ * @returns {string}
+ */
+function normPath(path) {
+  return String(path || "")
+    .replace(/\\/g, "/")
+    .replace(/\/+$/, "")
+    .toLowerCase();
+}
+
+/**
+ * Short label for sidebar (last path segment).
+ * @param {string} workspacePath
+ * @returns {string}
+ */
+function boardLabel(workspacePath) {
+  const parts = workspacePath.replace(/\\/g, "/").split("/").filter(Boolean);
+  return parts[parts.length - 1] || workspacePath;
+}
+
+/**
+ * Board swimlanes HTML (markers used by e2e).
  * @param {BoardState} state
  * @returns {string}
  */
-export function renderBoardHtml(state) {
+function renderSwimlanes(state) {
   const initiatives = state.initiatives ?? [];
   const slices = state.slices ?? [];
 
-  const swimlanes =
-    initiatives.length === 0
-      ? `<p class="empty" data-empty-board>No initiatives yet. Agents create them via the API.</p>`
-      : initiatives
-          .map((initiative) => {
-            const statusLabel =
-              INITIATIVE_STATUS_LABELS[initiative.status] ?? initiative.status;
-            const mine = slices.filter(
-              (s) => s.initiativeId === initiative.id,
-            );
-            const columns = SLICE_COLUMNS.map((col) => {
-              const cards = mine
-                .filter((s) => s.column === col)
-                .map(
-                  (s) => `
+  if (initiatives.length === 0) {
+    return `<p class="empty" data-empty-board>No initiatives yet. Agents create them via the API.</p>`;
+  }
+
+  return initiatives
+    .map((initiative) => {
+      const statusLabel =
+        INITIATIVE_STATUS_LABELS[initiative.status] ?? initiative.status;
+      const mine = slices.filter((s) => s.initiativeId === initiative.id);
+      const columns = SLICE_COLUMNS.map((col) => {
+        const cards = mine
+          .filter((s) => s.column === col)
+          .map(
+            (s) => `
                 <article class="card" data-slice-id="${escapeHtml(s.id)}" data-column="${escapeHtml(col)}">
                   <h3 class="card-title">${escapeHtml(s.title)}</h3>
                   ${s.notes ? `<p class="card-notes">${escapeHtml(s.notes)}</p>` : ""}
                 </article>`,
-                )
-                .join("");
-              return `
+          )
+          .join("");
+        return `
               <div class="column" data-column="${escapeHtml(col)}">
                 <h4 class="column-title">${escapeHtml(COLUMN_LABELS[col] ?? col)}</h4>
                 <div class="column-cards">${cards || `<p class="column-empty">—</p>`}</div>
               </div>`;
-            }).join("");
+      }).join("");
 
-            return `
+      return `
             <section class="initiative" data-initiative-id="${escapeHtml(initiative.id)}" data-status="${escapeHtml(initiative.status)}">
               <header class="initiative-header">
                 <div class="initiative-title-row">
@@ -294,6 +323,54 @@ export function renderBoardHtml(state) {
               </header>
               <div class="columns" role="list">${columns}</div>
             </section>`;
+    })
+    .join("");
+}
+
+/**
+ * @typedef {object} RenderShellOptions
+ * @property {Array<BoardSummary & { selected?: boolean, active?: boolean }>} [boards]
+ * @property {string | null} [selectedWorkspace]
+ * @property {string | null} [activeWorkspace]
+ * @property {number} [selectedMtimeMs]
+ */
+
+/**
+ * View-only board HTML with multi-board sidebar (no mutation controls).
+ * @param {BoardState | null} state
+ * @param {RenderShellOptions} [shell]
+ * @returns {string}
+ */
+export function renderBoardHtml(state, shell = {}) {
+  const boards = shell.boards ?? [];
+  const selectedWorkspace =
+    shell.selectedWorkspace ?? state?.workspacePath ?? null;
+  const activeWorkspace = shell.activeWorkspace ?? null;
+  const selectedMtimeMs = shell.selectedMtimeMs ?? 0;
+  const swimlanes = state
+    ? renderSwimlanes(state)
+    : `<p class="empty" data-empty-board>No board selected. Pick a workspace from the sidebar, or wait for MCP to create one.</p>`;
+
+  const navItems =
+    boards.length === 0
+      ? `<p class="nav-empty">No boards under data root yet.</p>`
+      : boards
+          .map((b) => {
+            const selected = Boolean(b.selected);
+            const active = Boolean(b.active);
+            const href = `/?workspace=${encodeURIComponent(b.workspacePath)}`;
+            const classes = [
+              "nav-item",
+              selected ? "is-selected" : "",
+              active ? "is-active" : "",
+            ]
+              .filter(Boolean)
+              .join(" ");
+            return `
+            <a class="${classes}" href="${escapeHtml(href)}" data-board-hash="${escapeHtml(b.hash)}" data-workspace="${escapeHtml(b.workspacePath)}" title="${escapeHtml(b.workspacePath)}">
+              <span class="nav-label">${escapeHtml(boardLabel(b.workspacePath))}</span>
+              ${active ? `<span class="nav-pill">active</span>` : ""}
+            </a>`;
           })
           .join("");
 
@@ -313,6 +390,7 @@ export function renderBoardHtml(state) {
       --accent: #0f766e;
       --badge-bg: #ecfdf5;
       --badge-ink: #115e59;
+      --nav-w: 240px;
     }
     * { box-sizing: border-box; }
     body {
@@ -322,7 +400,78 @@ export function renderBoardHtml(state) {
       background: var(--bg);
       line-height: 1.45;
     }
+    .app {
+      display: flex;
+      min-height: 100vh;
+    }
+    .sidebar {
+      width: var(--nav-w);
+      flex-shrink: 0;
+      background: var(--surface);
+      border-right: 1px solid var(--line);
+      padding: 1rem 0.75rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .sidebar h1 {
+      margin: 0 0 0.35rem;
+      font-size: 1rem;
+      letter-spacing: -0.02em;
+      padding: 0 0.35rem;
+    }
+    .sidebar-hint {
+      margin: 0 0 0.5rem;
+      padding: 0 0.35rem;
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+    .nav-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+      overflow-y: auto;
+    }
+    .nav-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.35rem;
+      padding: 0.45rem 0.55rem;
+      border-radius: 6px;
+      color: var(--ink);
+      text-decoration: none;
+      font-size: 0.85rem;
+      border: 1px solid transparent;
+    }
+    .nav-item:hover { background: var(--bg); }
+    .nav-item.is-selected {
+      background: #ecfdf5;
+      border-color: #99f6e4;
+      font-weight: 600;
+    }
+    .nav-label {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .nav-pill {
+      flex-shrink: 0;
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--accent);
+      font-weight: 700;
+    }
+    .nav-empty {
+      margin: 0;
+      padding: 0.35rem;
+      color: var(--muted);
+      font-size: 0.8rem;
+    }
     .page {
+      flex: 1;
+      min-width: 0;
       max-width: 1400px;
       margin: 0 auto;
       padding: 1.5rem 1.25rem 3rem;
@@ -336,6 +485,12 @@ export function renderBoardHtml(state) {
       margin: 0 0 1.5rem;
       color: var(--muted);
       font-size: 0.95rem;
+    }
+    .workspace-path {
+      margin: 0 0 1rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+      word-break: break-all;
     }
     .initiative {
       background: var(--surface);
@@ -425,21 +580,77 @@ export function renderBoardHtml(state) {
       color: var(--muted);
     }
     @media (max-width: 900px) {
+      .app { flex-direction: column; }
+      .sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--line); }
       .columns { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
     }
   </style>
 </head>
 <body>
-  <div class="page">
-    <header class="page-header">
-      <h1>Harness Board</h1>
-      <p>View-only — agents advance slices via API / MCP. Refresh to reload.</p>
-    </header>
-    <main id="board" data-workspace="${escapeHtml(state.workspacePath)}">
-      ${swimlanes}
-    </main>
-    <p class="meta" data-updated-at>Updated ${escapeHtml(state.updatedAt || "")}</p>
+  <div class="app">
+    <aside class="sidebar" data-boards-nav>
+      <h1>Boards</h1>
+      <p class="sidebar-hint">All workspaces · newest activity first</p>
+      <nav class="nav-list">${navItems}</nav>
+    </aside>
+    <div class="page">
+      <header class="page-header">
+        <h1>Harness Board</h1>
+        <p>View-only — agents advance slices via API / MCP. Auto-refreshes on activity.</p>
+      </header>
+      ${
+        selectedWorkspace
+          ? `<p class="workspace-path" data-selected-workspace>${escapeHtml(selectedWorkspace)}</p>`
+          : ""
+      }
+      <main id="board"
+        data-workspace="${escapeHtml(selectedWorkspace || "")}"
+        data-mtime-ms="${escapeHtml(String(selectedMtimeMs))}"
+        data-active-workspace="${escapeHtml(activeWorkspace || "")}">
+        ${swimlanes}
+      </main>
+      <p class="meta" data-updated-at>Updated ${escapeHtml(state?.updatedAt || "")}</p>
+    </div>
   </div>
+  <script>
+(function () {
+  var POLL_MS = 2500;
+  var boardEl = document.getElementById("board");
+  if (!boardEl) return;
+  var selectedPath = boardEl.getAttribute("data-workspace") || "";
+  var lastMtime = Number(boardEl.getAttribute("data-mtime-ms") || "0");
+  var lastActive = boardEl.getAttribute("data-active-workspace") || "";
+
+  function norm(p) {
+    var bs = String.fromCharCode(92);
+    return String(p || "").split(bs).join("/").replace(new RegExp("/+$"), "").toLowerCase();
+  }
+
+  function poll() {
+    fetch("/api/boards", { cache: "no-store" })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        var boards = data.boards || [];
+        var selected = boards.find(function (b) { return b.selected; });
+        if (selected && Number(selected.mtimeMs) !== lastMtime) {
+          location.reload();
+          return;
+        }
+        var active = data.activeWorkspace || "";
+        if (active && norm(active) !== norm(selectedPath)) {
+          location.href = "/?workspace=" + encodeURIComponent(active);
+          return;
+        }
+        if (active && active !== lastActive) {
+          location.reload();
+        }
+      })
+      .catch(function () { /* ignore transient poll errors */ });
+  }
+
+  setInterval(poll, POLL_MS);
+})();
+  </script>
 </body>
 </html>`;
 }
@@ -474,26 +685,113 @@ function sendJson(res, status, payload) {
 }
 
 /**
+ * @param {StoreOptions} storeOptions
+ * @param {string | null | undefined} defaultWorkspace
+ * @param {string | null | undefined} requested
+ */
+async function resolveSelection(storeOptions, defaultWorkspace, requested) {
+  const activeWorkspace = readActiveWorkspace(storeOptions.dataRoot) ?? null;
+  const { workspacePath, boards } = await resolveSelectedWorkspace({
+    dataRoot: storeOptions.dataRoot,
+    requested: requested ?? null,
+    defaultWorkspace: defaultWorkspace ?? null,
+    activeWorkspace,
+  });
+  return { workspacePath, boards, activeWorkspace };
+}
+
+/**
+ * @param {BoardSummary[]} boards
+ * @param {string | null} selectedWorkspace
+ * @param {string | null} activeWorkspace
+ */
+function annotateBoards(boards, selectedWorkspace, activeWorkspace) {
+  const sel = normPath(selectedWorkspace);
+  const act = normPath(activeWorkspace);
+  return boards.map((b) => ({
+    ...b,
+    selected: normPath(b.workspacePath) === sel,
+    active: act !== "" && normPath(b.workspacePath) === act,
+  }));
+}
+
+/**
  * @param {BoardServerOptions} options
  * @returns {http.Server}
  */
-export function createBoardServer(options) {
-  const workspacePath = options.workspacePath;
-  if (!workspacePath) {
-    throw new Error("workspacePath is required");
-  }
+export function createBoardServer(options = {}) {
+  const defaultWorkspace = options.workspacePath || undefined;
   /** @type {StoreOptions} */
   const storeOptions = {};
   if (options.dataRoot) storeOptions.dataRoot = options.dataRoot;
 
   const server = http.createServer(async (req, res) => {
     try {
-      const url = new URL(req.url || "/", `http://${req.headers.host || "127.0.0.1"}`);
+      const url = new URL(
+        req.url || "/",
+        `http://${req.headers.host || "127.0.0.1"}`,
+      );
       const method = req.method || "GET";
 
+      if (method === "GET" && url.pathname === "/api/boards") {
+        const requested =
+          url.searchParams.get("workspace") ||
+          url.searchParams.get("hash") ||
+          null;
+        const { workspacePath, boards, activeWorkspace } =
+          await resolveSelection(storeOptions, defaultWorkspace, requested);
+        const annotated = annotateBoards(
+          boards,
+          workspacePath,
+          activeWorkspace,
+        );
+        sendJson(res, 200, {
+          boards: annotated,
+          selectedWorkspace: workspacePath,
+          activeWorkspace,
+        });
+        return;
+      }
+
       if (method === "GET" && url.pathname === "/api/state") {
+        const requested =
+          url.searchParams.get("workspace") ||
+          url.searchParams.get("hash") ||
+          null;
+        const { workspacePath } = await resolveSelection(
+          storeOptions,
+          defaultWorkspace,
+          requested,
+        );
+        if (!workspacePath) {
+          sendJson(res, 404, {
+            ok: false,
+            error: "no board selected",
+          });
+          return;
+        }
         const state = await getState(workspacePath, storeOptions);
         sendJson(res, 200, state);
+        return;
+      }
+
+      if (method === "POST" && url.pathname === "/api/select") {
+        const raw = await readBody(req);
+        let body;
+        try {
+          body = raw ? JSON.parse(raw) : {};
+        } catch {
+          sendJson(res, 400, { ok: false, error: "invalid JSON body" });
+          return;
+        }
+        const workspace =
+          typeof body.workspace === "string" ? body.workspace.trim() : "";
+        if (!workspace) {
+          sendJson(res, 400, { ok: false, error: "workspace is required" });
+          return;
+        }
+        rememberActiveWorkspace(workspace, storeOptions.dataRoot);
+        sendJson(res, 200, { ok: true, workspace });
         return;
       }
 
@@ -510,8 +808,26 @@ export function createBoardServer(options) {
           });
           return;
         }
+        const fromBody =
+          typeof body.workspace === "string" && body.workspace.trim()
+            ? body.workspace.trim()
+            : null;
+        const workspacePath = fromBody || defaultWorkspace;
+        if (!workspacePath) {
+          sendJson(res, 400, {
+            ok: false,
+            error: "workspace required (body.workspace or server default)",
+            allowedActions: Object.values(ACTIONS),
+          });
+          return;
+        }
         try {
-          const result = await dispatchAction(workspacePath, body, storeOptions);
+          const result = await dispatchAction(
+            workspacePath,
+            body,
+            storeOptions,
+          );
+          rememberActiveWorkspace(workspacePath, storeOptions.dataRoot);
           sendJson(res, 200, { ok: true, ...result });
         } catch (err) {
           if (err instanceof TransitionError) {
@@ -530,9 +846,36 @@ export function createBoardServer(options) {
         return;
       }
 
-      if (method === "GET" && (url.pathname === "/" || url.pathname === "/index.html")) {
-        const state = await getState(workspacePath, storeOptions);
-        const html = renderBoardHtml(state);
+      if (
+        method === "GET" &&
+        (url.pathname === "/" || url.pathname === "/index.html")
+      ) {
+        const requested =
+          url.searchParams.get("workspace") ||
+          url.searchParams.get("hash") ||
+          null;
+        const { workspacePath, boards, activeWorkspace } =
+          await resolveSelection(storeOptions, defaultWorkspace, requested);
+        if (requested && workspacePath) {
+          rememberActiveWorkspace(workspacePath, storeOptions.dataRoot);
+        }
+        const annotated = annotateBoards(
+          boards,
+          workspacePath,
+          activeWorkspace,
+        );
+        const selectedSummary = annotated.find((b) => b.selected);
+        /** @type {BoardState | null} */
+        let state = null;
+        if (workspacePath) {
+          state = await getState(workspacePath, storeOptions);
+        }
+        const html = renderBoardHtml(state, {
+          boards: annotated,
+          selectedWorkspace: workspacePath,
+          activeWorkspace,
+          selectedMtimeMs: selectedSummary?.mtimeMs ?? 0,
+        });
         res.writeHead(200, {
           "Content-Type": "text/html; charset=utf-8",
           "Cache-Control": "no-store",
@@ -556,7 +899,7 @@ export function createBoardServer(options) {
  * @param {BoardServerOptions} options
  * @returns {Promise<{ server: http.Server, url: string, port: number }>}
  */
-export function startBoardServer(options) {
+export function startBoardServer(options = {}) {
   const host = options.host ?? "127.0.0.1";
   const server = createBoardServer(options);
 

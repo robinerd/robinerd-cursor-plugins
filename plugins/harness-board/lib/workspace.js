@@ -1,0 +1,90 @@
+import { resolve, join } from "node:path";
+import { homedir } from "node:os";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { defaultDataRoot } from "./store.js";
+
+/**
+ * True when Cursor left a template unexpanded (e.g. literal `${workspaceFolder}`).
+ * @param {string} value
+ */
+export function isUnexpandedTemplate(value) {
+  return /\$\{[^}]+\}/.test(value);
+}
+
+/**
+ * @param {string} [dataRoot]
+ * @returns {string}
+ */
+function activeWorkspaceFile(dataRoot) {
+  return join(defaultDataRoot(dataRoot), "active-workspace.txt");
+}
+
+/**
+ * Remember last good workspace so MCP/UI can recover when Cursor leaves
+ * `${workspaceFolder}` unexpanded and process.cwd() is $HOME.
+ * @param {string} workspacePath
+ * @param {string} [dataRoot]
+ */
+export function rememberActiveWorkspace(workspacePath, dataRoot) {
+  if (!workspacePath || isUnexpandedTemplate(workspacePath)) return;
+  const resolved = resolve(workspacePath);
+  if (resolved === resolve(homedir())) return;
+  try {
+    const root = defaultDataRoot(dataRoot);
+    mkdirSync(root, { recursive: true });
+    writeFileSync(activeWorkspaceFile(dataRoot), resolved, "utf8");
+  } catch {
+    // best-effort pointer only
+  }
+}
+
+/**
+ * @param {string} [dataRoot]
+ * @returns {string | undefined}
+ */
+export function readActiveWorkspace(dataRoot) {
+  try {
+    const raw = readFileSync(activeWorkspaceFile(dataRoot), "utf8").trim();
+    if (!raw || isUnexpandedTemplate(raw)) return undefined;
+    return resolve(raw);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Pick a usable workspace path. Plugin MCP env sometimes ships the literal
+ * `${workspaceFolder}` string; never use that as a store key.
+ * @param {string | undefined} candidate
+ * @param {string} [fallback]
+ * @param {string} [dataRoot]
+ */
+export function sanitizeWorkspacePath(
+  candidate,
+  fallback = process.cwd(),
+  dataRoot,
+) {
+  const home = resolve(homedir());
+  const remembered = readActiveWorkspace(dataRoot);
+
+  if (candidate && typeof candidate === "string") {
+    const trimmed = candidate.trim();
+    if (trimmed && !isUnexpandedTemplate(trimmed)) {
+      const resolved = resolve(trimmed);
+      if (resolved !== home) {
+        rememberActiveWorkspace(resolved, dataRoot);
+        return resolved;
+      }
+    }
+  }
+
+  if (remembered) return remembered;
+
+  const fb = resolve(fallback);
+  if (fb !== home) {
+    rememberActiveWorkspace(fb, dataRoot);
+    return fb;
+  }
+
+  return remembered ?? fb;
+}
