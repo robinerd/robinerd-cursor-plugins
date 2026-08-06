@@ -1,7 +1,9 @@
-import { resolve } from "node:path";
+import { resolve, join } from "node:path";
+import { homedir } from "node:os";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { getState } from "./store.js";
+import { defaultDataRoot, getState } from "./store.js";
 import { dispatchAction } from "./server.js";
 import { ACTIONS, TransitionError } from "./transitions.js";
 
@@ -67,20 +69,82 @@ export function isUnexpandedTemplate(value) {
 }
 
 /**
+ * @param {string} [dataRoot]
+ * @returns {string}
+ */
+function activeWorkspacePath(dataRoot) {
+  return join(defaultDataRoot(dataRoot), "active-workspace.txt");
+}
+
+/**
+ * Remember last good workspace so MCP can recover when Cursor leaves
+ * `${workspaceFolder}` unexpanded and process.cwd() is $HOME.
+ * @param {string} workspacePath
+ * @param {string} [dataRoot]
+ */
+export function rememberActiveWorkspace(workspacePath, dataRoot) {
+  if (!workspacePath || isUnexpandedTemplate(workspacePath)) return;
+  const resolved = resolve(workspacePath);
+  if (resolved === resolve(homedir())) return;
+  try {
+    const root = defaultDataRoot(dataRoot);
+    mkdirSync(root, { recursive: true });
+    writeFileSync(activeWorkspacePath(dataRoot), resolved, "utf8");
+  } catch {
+    // best-effort pointer only
+  }
+}
+
+/**
+ * @param {string} [dataRoot]
+ * @returns {string | undefined}
+ */
+export function readActiveWorkspace(dataRoot) {
+  try {
+    const raw = readFileSync(activeWorkspacePath(dataRoot), "utf8").trim();
+    if (!raw || isUnexpandedTemplate(raw)) return undefined;
+    return resolve(raw);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Pick a usable workspace path. Plugin MCP env sometimes ships the literal
  * `${workspaceFolder}` string; never use that as a store key.
  * @param {string | undefined} candidate
  * @param {string} [fallback]
+ * @param {string} [dataRoot]
  */
-export function sanitizeWorkspacePath(candidate, fallback = process.cwd()) {
-  if (!candidate || typeof candidate !== "string") {
-    return resolve(fallback);
+export function sanitizeWorkspacePath(
+  candidate,
+  fallback = process.cwd(),
+  dataRoot,
+) {
+  const home = resolve(homedir());
+  const remembered = readActiveWorkspace(dataRoot);
+
+  if (candidate && typeof candidate === "string") {
+    const trimmed = candidate.trim();
+    if (trimmed && !isUnexpandedTemplate(trimmed)) {
+      const resolved = resolve(trimmed);
+      if (resolved !== home) {
+        rememberActiveWorkspace(resolved, dataRoot);
+        return resolved;
+      }
+    }
   }
-  const trimmed = candidate.trim();
-  if (!trimmed || isUnexpandedTemplate(trimmed)) {
-    return resolve(fallback);
+
+  if (remembered) return remembered;
+
+  const fb = resolve(fallback);
+  if (fb !== home) {
+    rememberActiveWorkspace(fb, dataRoot);
+    return fb;
   }
-  return resolve(trimmed);
+
+  // Last resort — still prefer remembered if any; else home (empty board).
+  return remembered ?? fb;
 }
 
 /**
@@ -88,9 +152,6 @@ export function sanitizeWorkspacePath(candidate, fallback = process.cwd()) {
  * @param {{ workspacePath?: string, dataRoot?: string }} [overrides]
  */
 export function resolveBoardEnv(overrides = {}) {
-  const workspacePath = sanitizeWorkspacePath(
-    overrides.workspacePath ?? process.env.HARNESS_BOARD_WORKSPACE,
-  );
   const dataRootRaw =
     overrides.dataRoot ?? process.env.HARNESS_BOARD_DATA_ROOT ?? undefined;
   /** @type {StoreOptions} */
@@ -98,6 +159,11 @@ export function resolveBoardEnv(overrides = {}) {
   if (dataRootRaw && !isUnexpandedTemplate(dataRootRaw)) {
     storeOptions.dataRoot = resolve(dataRootRaw);
   }
+  const workspacePath = sanitizeWorkspacePath(
+    overrides.workspacePath ?? process.env.HARNESS_BOARD_WORKSPACE,
+    process.cwd(),
+    storeOptions.dataRoot,
+  );
   return { workspacePath, storeOptions };
 }
 

@@ -146,23 +146,40 @@ test("tool name binds role: args.action cannot override tool name", async () => 
 });
 
 test("sanitizeWorkspacePath rejects unexpanded ${workspaceFolder}", async () => {
-  const { resolve } = await import("node:path");
-  const { isUnexpandedTemplate, sanitizeWorkspacePath } = await import(
-    "../lib/mcp.js"
-  );
+  const { mkdtemp } = await import("node:fs/promises");
+  const { tmpdir, homedir } = await import("node:os");
+  const { resolve, join } = await import("node:path");
+  const {
+    isUnexpandedTemplate,
+    sanitizeWorkspacePath,
+    rememberActiveWorkspace,
+  } = await import("../lib/mcp.js");
+
   assert.equal(isUnexpandedTemplate("${workspaceFolder}"), true);
   assert.equal(
     isUnexpandedTemplate("C:\\Users\\robin\\${workspaceFolder}"),
     true,
   );
   assert.equal(isUnexpandedTemplate("D:\\robinerd-cursor-plugins"), false);
-  const fallback = "D:\\robinerd-cursor-plugins";
+
+  const dataRoot = await mkdtemp(join(tmpdir(), "harness-board-ws-"));
+  const project = resolve("D:\\robinerd-cursor-plugins");
+  rememberActiveWorkspace(project, dataRoot);
+
   assert.equal(
-    sanitizeWorkspacePath("${workspaceFolder}", fallback),
-    resolve(fallback),
+    sanitizeWorkspacePath("${workspaceFolder}", resolve(homedir()), dataRoot),
+    project,
   );
   assert.equal(
-    sanitizeWorkspacePath("C:\\Users\\robin\\${workspaceFolder}", fallback),
-    resolve(fallback),
+    sanitizeWorkspacePath(
+      "C:\\Users\\robin\\${workspaceFolder}",
+      resolve(homedir()),
+      dataRoot,
+    ),
+    project,
+  );
+  assert.equal(
+    sanitizeWorkspacePath(project, resolve(homedir()), dataRoot),
+    project,
   );
 });
