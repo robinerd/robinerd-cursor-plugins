@@ -168,6 +168,13 @@ test("e2e happy path: upsert → … → done + HTML markers + persistence", asy
     assert.match(html, /Drive-script coverage for harness-board/);
     assert.match(html, /data-plan-link/);
     assert.match(html, /plans\/harness-board\.md/);
+    assert.match(html, /\/api\/plan\?/);
+
+    // Path traversal must be rejected:
+    const trav = await fetch(
+      `${url}/api/plan?workspace=${encodeURIComponent(WORKSPACE)}&path=${encodeURIComponent("../secrets.txt")}`,
+    );
+    assert.equal(trav.status, 400);
     assert.match(
       html,
       new RegExp(

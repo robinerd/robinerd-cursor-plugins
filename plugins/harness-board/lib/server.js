@@ -1,4 +1,6 @@
 import http from "node:http";
+import { readFile } from "node:fs/promises";
+import { isAbsolute, relative, resolve as pathResolve, sep } from "node:path";
 import { getState } from "./store.js";
 import {
   listBoardSummaries,
@@ -266,6 +268,66 @@ function normPath(path) {
 }
 
 /**
+ * Resolve planPath under workspace; reject path traversal.
+ * @param {string} workspacePath
+ * @param {string} planPath
+ * @returns {string | null}
+ */
+export function resolveSafePlanPath(workspacePath, planPath) {
+  if (
+    typeof workspacePath !== "string" ||
+    !workspacePath.trim() ||
+    typeof planPath !== "string" ||
+    !planPath.trim()
+  ) {
+    return null;
+  }
+  const root = pathResolve(workspacePath.trim());
+  const candidate = isAbsolute(planPath.trim())
+    ? pathResolve(planPath.trim())
+    : pathResolve(root, planPath.trim());
+  const rel = relative(root, candidate);
+  if (rel.startsWith("..") || isAbsolute(rel)) {
+    return null;
+  }
+  const rootPrefix = root.endsWith(sep) ? root : root + sep;
+  const candNorm = candidate.toLowerCase();
+  const rootNorm = root.toLowerCase();
+  const prefixNorm = rootPrefix.toLowerCase();
+  if (candNorm !== rootNorm && !candNorm.startsWith(prefixNorm)) {
+    return null;
+  }
+  return candidate;
+}
+
+/**
+ * @param {string} absPath
+ * @returns {string}
+ */
+export function toFileUrl(absPath) {
+  const normalized = absPath.replace(/\\/g, "/");
+  if (/^[A-Za-z]:\//.test(normalized)) {
+    return `file:///${normalized}`;
+  }
+  if (normalized.startsWith("/")) {
+    return `file://${normalized}`;
+  }
+  return `file:///${normalized}`;
+}
+
+/**
+ * @param {string} workspacePath
+ * @param {string} planPath
+ */
+function planViewHref(workspacePath, planPath) {
+  const qs = new URLSearchParams({
+    workspace: workspacePath,
+    path: planPath,
+  });
+  return `/api/plan?${qs.toString()}`;
+}
+
+/**
  * Short label for sidebar (last path segment).
  * @param {string} workspacePath
  * @returns {string}
@@ -283,6 +345,7 @@ function boardLabel(workspacePath) {
 function renderSwimlanes(state) {
   const initiatives = state.initiatives ?? [];
   const slices = state.slices ?? [];
+  const workspacePath = state.workspacePath || "";
 
   if (initiatives.length === 0) {
     return `<p class="empty" data-empty-board>No initiatives yet. Agents create them via the API.</p>`;
@@ -311,6 +374,13 @@ function renderSwimlanes(state) {
               </div>`;
       }).join("");
 
+      const planPath = initiative.planPath || "";
+      const abs = resolveSafePlanPath(workspacePath, planPath);
+      const href =
+        workspacePath && planPath ? planViewHref(workspacePath, planPath) : "#";
+      const fileHref = abs ? toFileUrl(abs) : "";
+      const titleAttr = fileHref ? ` title="${escapeHtml(fileHref)}"` : "";
+
       return `
             <section class="initiative" data-initiative-id="${escapeHtml(initiative.id)}" data-status="${escapeHtml(initiative.status)}">
               <header class="initiative-header">
@@ -319,7 +389,7 @@ function renderSwimlanes(state) {
                   <span class="badge status-${escapeHtml(initiative.status)}" data-status-badge>${escapeHtml(statusLabel)}</span>
                 </div>
                 <p class="initiative-blurb" data-blurb>${escapeHtml(initiative.blurb || "")}</p>
-                <a class="plan-link" data-plan-link href="${escapeHtml(initiative.planPath)}">${escapeHtml(initiative.planPath)}</a>
+                <a class="plan-link" data-plan-link href="${escapeHtml(href)}"${titleAttr}>${escapeHtml(planPath)}</a>
               </header>
               <div class="columns" role="list">${columns}</div>
             </section>`;
@@ -843,6 +913,77 @@ export function createBoardServer(options = {}) {
           }
           throw err;
         }
+        return;
+      }
+
+      if (method === "GET" && url.pathname === "/api/plan") {
+        const workspace =
+          url.searchParams.get("workspace") || defaultWorkspace || "";
+        const planPath = url.searchParams.get("path") || "";
+        const abs = resolveSafePlanPath(workspace, planPath);
+        if (!abs) {
+          sendJson(res, 400, {
+            ok: false,
+            error: "invalid plan path (must stay under workspace)",
+          });
+          return;
+        }
+        let text;
+        try {
+          text = await readFile(abs, "utf8");
+        } catch (err) {
+          const code = /** @type {NodeJS.ErrnoException} */ (err).code;
+          sendJson(res, code === "ENOENT" ? 404 : 500, {
+            ok: false,
+            error:
+              code === "ENOENT"
+                ? `plan not found: ${planPath}`
+                : err instanceof Error
+                  ? err.message
+                  : String(err),
+          });
+          return;
+        }
+        const fileHref = toFileUrl(abs);
+        const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${escapeHtml(planPath)}</title>
+  <style>
+    body { margin: 0; font-family: "Segoe UI", ui-sans-serif, system-ui, sans-serif; background: #f3f4f6; color: #1f2937; }
+    header { padding: 1rem 1.25rem; background: #fff; border-bottom: 1px solid #e5e7eb; }
+    header a { color: #0f766e; }
+    pre {
+      margin: 1rem 1.25rem 2rem;
+      padding: 1rem;
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 0.9rem;
+      line-height: 1.45;
+    }
+    .meta { color: #6b7280; font-size: 0.85rem; margin-top: 0.35rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <div><strong>${escapeHtml(planPath)}</strong></div>
+    <div class="meta">${escapeHtml(abs)}</div>
+    <div class="meta"><a href="${escapeHtml(fileHref)}">${escapeHtml(fileHref)}</a> (may be blocked from http pages — copy into Explorer / Cursor)</div>
+  </header>
+  <pre>${escapeHtml(text)}</pre>
+</body>
+</html>`;
+        res.writeHead(200, {
+          "Content-Type": "text/html; charset=utf-8",
+          "Cache-Control": "no-store",
+        });
+        res.end(html);
         return;
       }
 
