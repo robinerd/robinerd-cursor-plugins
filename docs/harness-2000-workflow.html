@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Harness-2000 Workflow</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 32px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #fff;
+      color: #1a1a1a;
+    }
+    h1 { margin: 0; font-size: 28px; font-weight: 700; }
+    .sub { margin: 4px 0 20px; color: #555; font-size: 14px; }
+    #chart { position: relative; margin: 0 auto; }
+    .phase-title {
+      position: absolute;
+      text-align: center;
+      font-weight: 700;
+      font-size: 14px;
+      color: #1a1a1a;
+    }
+    .phase-title .n { color: #2b6ef2; }
+    .step {
+      position: absolute;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #fff;
+      border: 1px solid #333;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #1a1a1a;
+    }
+    .step.chip {
+      border-color: #2b6ef2;
+      color: #2b6ef2;
+      border-radius: 3px;
+      font-size: 10px;
+      font-weight: 500;
+      font-style: italic;
+    }
+    .hint {
+      position: absolute;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 2px;
+      color: #1a1a1a;
+      font-size: 13px;
+    }
+    .hint .agent {
+      color: #2b6ef2;
+      font-size: 12px;
+      font-weight: 600;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .hint .part { line-height: 18px; }
+  </style>
+</head>
+<body>
+  <h1>Harness-2000</h1>
+  <div class="sub">Workflow</div>
+  <div id="chart"></div>
+  <script>
+    const BOX_W = 140, BOX_H = 36, CHIP_H = 18, CHIP_W = 92, BOX_GAP = 14;
+    const PHASE_PAD_X = 16, PHASE_PAD_TOP = 36, PHASE_PAD_BOTTOM = 16;
+    const HINT_GAP = 12, AGENT_ARROW = 24, HINT_W = 220, SUB_LINE = 18;
+    const accent = "#2b6ef2", stroke = "#333", fill = "#f2f2f2", bg = "#fff";
+
+    const PHASES = [
+      {
+        id: "decide", title: "Decide",
+        steps: [
+          { id: "1", label: "Intent", hint: "What & why?" },
+          { id: "2", label: "Alternatives", hint: "Reuse vs build?" },
+          { id: "3", label: "Priority", hint: "Do it now?" },
+          { id: "4", label: "Design", parts: ["Systems", "Constraints", "Boundaries", "Risks"] },
+          { id: "5", label: "Verification", parts: ["E2E acceptance", "Regression", "CI / delivery"] },
+          { id: "6", label: "Slices", hint: "What to build?" },
+        ],
+      },
+      {
+        id: "build", title: "Build · per slice",
+        steps: [
+          { id: "7", label: "Implement", agent: "implementer" },
+          { id: "8", label: "Review", agent: "code-reviewer" },
+          { id: "9", label: "Verify", agent: "behavior-verifier" },
+          { id: "9b", label: "Human approval", optional: true },
+        ],
+      },
+      {
+        id: "finish", title: "Finish",
+        steps: [
+          { id: "10", label: "Integrate", hint: "PR, Changelog" },
+          { id: "11", label: "Release", hint: "Ship or not?" },
+        ],
+      },
+    ];
+
+    function stepH(s) {
+      if (s.optional) return CHIP_H;
+      if (!s.parts?.length) return BOX_H;
+      return Math.max(BOX_H, s.parts.length * SUB_LINE + 8);
+    }
+    function phaseH(steps) {
+      const content = steps.reduce((a, s) => a + stepH(s), 0) + Math.max(0, steps.length - 1) * BOX_GAP;
+      return PHASE_PAD_TOP + content + PHASE_PAD_BOTTOM;
+    }
+    const bridgeH = (i) => (i === 0 ? 68 : 44);
+    const phaseW = PHASE_PAD_X + BOX_W + Math.max(HINT_GAP, AGENT_ARROW) + HINT_W + PHASE_PAD_X;
+    const phaseHs = PHASES.map((p) => phaseH(p.steps));
+    const ox = 6;
+    const totalH = phaseHs.reduce((a, b) => a + b, 0) + bridgeH(0) + bridgeH(1) + ox;
+    const totalW = phaseW + ox;
+
+    function phaseY(pi) {
+      let y = 0;
+      for (let i = 0; i < pi; i++) y += phaseHs[i] + bridgeH(i);
+      return y;
+    }
+    const boxX = ox + PHASE_PAD_X;
+    function boxY(pi, si) {
+      let y = phaseY(pi) + PHASE_PAD_TOP;
+      for (let i = 0; i < si; i++) y += stepH(PHASES[pi].steps[i]) + BOX_GAP;
+      return y;
+    }
+
+    const chart = document.getElementById("chart");
+    chart.style.width = totalW + "px";
+    chart.style.height = totalH + "px";
+
+    const svgNS = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(svgNS, "svg");
+    svg.setAttribute("width", totalW);
+    svg.setAttribute("height", totalH);
+    svg.style.position = "absolute";
+    svg.style.inset = "0";
+
+    function el(name, attrs, text) {
+      const n = document.createElementNS(svgNS, name);
+      for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+      if (text != null) n.textContent = text;
+      return n;
+    }
+
+    PHASES.forEach((phase, pi) => {
+      const y = phaseY(pi), h = phaseHs[pi], w = phaseW;
+      svg.appendChild(el("rect", { x: ox, y, width: w, height: h, rx: 10, fill, stroke, "stroke-width": 1.25 }));
+      if (phase.id === "build") {
+        const o = 4;
+        svg.appendChild(el("path", {
+          d: `M ${ox - o} ${y + 10} L ${ox - o} ${y + h + o - 10} Q ${ox - o} ${y + h + o} ${ox - o + 10} ${y + h + o} L ${ox + w - 10} ${y + h + o}`,
+          fill: "none", stroke, "stroke-width": 1.25,
+        }));
+      }
+    });
+
+    PHASES.forEach((phase, pi) => {
+      phase.steps.slice(0, -1).forEach((step, si) => {
+        const x = boxX + BOX_W / 2;
+        const y1 = boxY(pi, si) + stepH(step);
+        const y2 = boxY(pi, si + 1);
+        svg.appendChild(el("line", { x1: x, y1, x2: x, y2: y2 - 6, stroke, "stroke-width": 1.5 }));
+        svg.appendChild(el("polygon", { points: `${x - 4},${y2 - 7} ${x + 4},${y2 - 7} ${x},${y2}`, fill: stroke }));
+      });
+    });
+
+    PHASES.forEach((phase, pi) => {
+      phase.steps.forEach((step, si) => {
+        if (!step.agent) return;
+        const y = boxY(pi, si) + stepH(step) / 2;
+        const x1 = boxX + BOX_W, x2 = boxX + BOX_W + AGENT_ARROW;
+        svg.appendChild(el("line", { x1, y1: y, x2: x2 - 6, y2: y, stroke: accent, "stroke-width": 1.25 }));
+        svg.appendChild(el("polygon", { points: `${x2 - 6},${y - 3.5} ${x2 - 6},${y + 3.5} ${x2},${y}`, fill: accent }));
+      });
+    });
+
+    PHASES.slice(0, -1).forEach((phase, i) => {
+      const x = boxX + BOX_W / 2;
+      const last = phase.steps[phase.steps.length - 1];
+      const y1 = boxY(i, phase.steps.length - 1) + stepH(last);
+      const y2 = boxY(i + 1, 0);
+      const label = i === 0 ? "Human approval" : null;
+      const midY = label ? y1 + (y2 - y1) * 0.38 : (y1 + y2) / 2;
+      const labelW = 92, labelH = 18;
+      svg.appendChild(el("line", { x1: x, y1, x2: x, y2: label ? midY - labelH / 2 : y2 - 6, stroke, "stroke-width": 1.5 }));
+      if (label) {
+        svg.appendChild(el("line", { x1: x, y1: midY + labelH / 2, x2: x, y2: y2 - 6, stroke, "stroke-width": 1.5 }));
+        svg.appendChild(el("rect", { x: x - labelW / 2, y: midY - labelH / 2, width: labelW, height: labelH, rx: 3, fill: bg, stroke: accent, "stroke-width": 1 }));
+        const t = el("text", { x, y: midY + 4, "text-anchor": "middle", fill: accent, "font-size": 10, "font-weight": 500, "font-style": "italic" }, label);
+        svg.appendChild(t);
+      }
+      svg.appendChild(el("polygon", { points: `${x - 4},${y2 - 7} ${x + 4},${y2 - 7} ${x},${y2}`, fill: stroke }));
+    });
+
+    chart.appendChild(svg);
+
+    PHASES.forEach((phase, pi) => {
+      const title = document.createElement("div");
+      title.className = "phase-title";
+      title.style.left = ox + "px";
+      title.style.top = phaseY(pi) + 10 + "px";
+      title.style.width = phaseW + "px";
+      title.innerHTML = `<span class="n">${pi + 1}.</span> ${phase.title}`;
+      chart.appendChild(title);
+
+      phase.steps.forEach((step, si) => {
+        const h = stepH(step);
+        const isChip = !!step.optional;
+        const w = isChip ? CHIP_W : BOX_W;
+        const left = isChip ? boxX + (BOX_W - CHIP_W) / 2 : boxX;
+        const box = document.createElement("div");
+        box.className = "step" + (isChip ? " chip" : "");
+        box.style.left = left + "px";
+        box.style.top = boxY(pi, si) + "px";
+        box.style.width = w + "px";
+        box.style.height = h + "px";
+        box.textContent = step.label;
+        chart.appendChild(box);
+
+        const hint = document.createElement("div");
+        hint.className = "hint";
+        hint.style.left = boxX + BOX_W + (step.agent ? AGENT_ARROW + 2 : HINT_GAP) + "px";
+        hint.style.top = boxY(pi, si) + "px";
+        hint.style.width = HINT_W + "px";
+        hint.style.height = h + "px";
+        if (step.agent) {
+          hint.innerHTML = `<div class="agent">${step.agent}</div>`;
+        } else if (step.parts?.length) {
+          hint.innerHTML = step.parts.map((p) => `<div class="part">${p}</div>`).join("");
+        } else if (step.hint) {
+          hint.textContent = step.hint;
+        }
+        chart.appendChild(hint);
+      });
+    });
+  </script>
+</body>
+</html>
