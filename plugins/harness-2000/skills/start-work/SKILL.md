@@ -19,5 +19,5 @@ Stay in **Agent mode**. Never switch to Plan mode.
    - **trivial:** record skips for stages 2–6 if user confirms direct fix; else still open a thin plan.
    - **feature / breaking:** Skips none; complete §§1–6 in this Agent chat before coding.
    - **spike:** note time-box in Intent; Skips may include 10–11; do not treat spike output as shipped feature.
-5. **Harness-board (when MCP available):** after creating `plans/<id>.md`, call `initiative_upsert` with `title`, `planPath`, blurb from Intent (or short placeholder until §1 is filled), and status `planning`. Soft-fail if MCP unavailable — note `board MCP unavailable` and continue.
+5. **Harness-board (when MCP available):** after creating `plans/<id>.md`, call `initiative_upsert` with `title`, `planPath`, blurb from Intent (or short placeholder until §1 is filled), and status `planning`. Always pass `workspace` (absolute path of the agent’s project root). To operate on another board, pass that workspace’s absolute path instead. Soft-fail if MCP unavailable — note `board MCP unavailable` and continue.
 6. Offer next: `/define-feature` or fill §1 now (use **ask-user** for open decisions).

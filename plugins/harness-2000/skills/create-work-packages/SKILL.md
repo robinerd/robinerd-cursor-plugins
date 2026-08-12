@@ -18,4 +18,4 @@ Edit **only** `## 6. Work breakdown` (Stage → `6-breakdown`).
 - Mark which slices need a human check after verify (secrets, prod, ambiguous UX, breaking).
 - If slice boundaries are ambiguous, use **ask-user** before locking §6.
 - After §6 is written, remind: implementation starts only via `/implement-next` with the slice gate (approve one | mass-approve remaining).
-- **Harness-board (when MCP available):** after writing §6 slices, call `slice_add` for each slice onto the initiative (use `board_get` / `list_slices` if you need the initiative id). Soft-fail if MCP unavailable — note `board MCP unavailable` and continue.
+- **Harness-board (when MCP available):** after writing §6 slices, call `slice_add` for each slice onto the initiative (use `board_get` / `list_slices` if you need the initiative id). Always pass `workspace` (absolute path of the agent’s project root) on every board tool call. To operate on another board, pass that workspace’s absolute path instead. Soft-fail if MCP unavailable — note `board MCP unavailable` and continue.

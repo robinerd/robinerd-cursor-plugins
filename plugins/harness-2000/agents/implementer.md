@@ -21,8 +21,10 @@ Runtime slice status lives on **harness-board**, not in plan.md. Soft allowlist 
 **Allowed tools:** `board_get`, `list_slices`, `implementer_start`, `implementer_submit`  
 **Do not call:** `initiative_upsert`, `slice_add`, `slice_approve`, `reviewer_verdict`, `verifier_verdict`, `human_unblock`, `park`, or any other board mutation.
 
-1. When beginning the slice: call `implementer_start` with the board slice id.
-2. When work completed (before return): call `implementer_submit` with summary (and files touched if supported).
+Always pass `workspace` (absolute path of the agent’s project root) on every board tool call. To operate on another board, pass that workspace’s absolute path instead.
+
+1. When beginning the slice: call `implementer_start` with the board slice id and `workspace`.
+2. When work completed (before return): call `implementer_submit` with summary (and files touched if supported) and `workspace`.
 3. If board MCP is unavailable: note `board MCP unavailable` in Return and continue — do not hard-block praxis.
 
 ## Rules

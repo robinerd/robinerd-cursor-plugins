@@ -21,7 +21,9 @@ You verify **behavior against §5 Verification design** — not code style, not 
 **Allowed tools:** `board_get`, `list_slices`, `verifier_verdict`  
 **Do not call:** implementer, reviewer, or orchestrator board mutations (`implementer_start`, `implementer_submit`, `reviewer_verdict`, `slice_approve`, etc.).
 
-Before return: call `verifier_verdict` with the board slice id and verdict `pass` | `fail` | `bounce` | `replan` (plus evidence).  
+Always pass `workspace` (absolute path of the agent’s project root) on every board tool call. To operate on another board, pass that workspace’s absolute path instead.
+
+Before return: call `verifier_verdict` with the board slice id, `workspace`, and verdict `pass` | `fail` | `bounce` | `replan` (plus evidence).  
 If board MCP is unavailable: note `board MCP unavailable` in Output and continue — do not hard-block praxis.
 
 ## Do

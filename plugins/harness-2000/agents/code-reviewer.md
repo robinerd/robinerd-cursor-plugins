@@ -21,7 +21,9 @@ You are an independent reviewer. You did not implement this change. Judge fit to
 **Allowed tools:** `board_get`, `list_slices`, `reviewer_verdict`  
 **Do not call:** implementer, verifier, or orchestrator board mutations (`implementer_start`, `implementer_submit`, `verifier_verdict`, `slice_approve`, etc.).
 
-Before return: call `reviewer_verdict` with the board slice id and verdict `approve` | `revise` | `bounce` (plus findings).  
+Always pass `workspace` (absolute path of the agent’s project root) on every board tool call. To operate on another board, pass that workspace’s absolute path instead.
+
+Before return: call `reviewer_verdict` with the board slice id, `workspace`, and verdict `approve` | `revise` | `bounce` (plus findings).  
 If board MCP is unavailable: note `board MCP unavailable` in Output and continue — do not hard-block praxis.
 
 ## Do

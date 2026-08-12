@@ -6,15 +6,14 @@ import { dispatchAction } from "./server.js";
 import { ACTIONS, TransitionError } from "./transitions.js";
 import {
   isUnexpandedTemplate,
-  rememberActiveWorkspace,
-  readActiveWorkspace,
-  sanitizeWorkspacePath,
+  resolveExplicitWorkspace,
 } from "./workspace.js";
 
 export {
   isUnexpandedTemplate,
   rememberActiveWorkspace,
   readActiveWorkspace,
+  resolveExplicitWorkspace,
   sanitizeWorkspacePath,
 } from "./workspace.js";
 
@@ -28,6 +27,9 @@ export const MUTATION_TOOLS = Object.freeze(Object.values(ACTIONS));
 
 /** All exposed MCP tool names. */
 export const TOOL_NAMES = Object.freeze([...READ_TOOLS, ...MUTATION_TOOLS]);
+
+/** Required on every MCP tool schema. */
+const workspaceArg = z.string();
 
 /**
  * @returns {string[]}
@@ -72,8 +74,10 @@ function textResult(payload, isError = false) {
 }
 
 /**
- * Resolve workspace + optional data root from env (or overrides).
- * @param {{ workspacePath?: string, dataRoot?: string }} [overrides]
+ * Resolve optional store data root from env (or overrides).
+ * Does not resolve workspace — MCP tools take `workspace` from args only.
+ * @param {{ dataRoot?: string }} [overrides]
+ * @returns {StoreOptions}
  */
 export function resolveBoardEnv(overrides = {}) {
   const dataRootRaw =
@@ -83,22 +87,21 @@ export function resolveBoardEnv(overrides = {}) {
   if (dataRootRaw && !isUnexpandedTemplate(dataRootRaw)) {
     storeOptions.dataRoot = resolve(dataRootRaw);
   }
-  const workspacePath = sanitizeWorkspacePath(
-    overrides.workspacePath ?? process.env.HARNESS_BOARD_WORKSPACE,
-    process.cwd(),
-    storeOptions.dataRoot,
-  );
-  return { workspacePath, storeOptions };
+  return storeOptions;
 }
 
 /**
  * Shared tool handler used by the stdio MCP server and smoke tests.
+ * Workspace comes from `args.workspace` only (required). Env may supply dataRoot.
+ * Never reads HARNESS_BOARD_WORKSPACE or active-workspace.txt; never remembers active.
  * @param {string} name
  * @param {Record<string, unknown>} [args]
- * @param {{ workspacePath?: string, dataRoot?: string }} [env]
+ * @param {{ dataRoot?: string }} [env]
  */
 export async function callBoardTool(name, args = {}, env = {}) {
-  const { workspacePath, storeOptions } = resolveBoardEnv(env);
+  const storeOptions = resolveBoardEnv(env);
+  const workspacePath = resolveExplicitWorkspace(args.workspace);
+  const { workspace: _workspace, ...toolArgs } = args;
 
   if (name === "move_card") {
     throw new TransitionError(
@@ -115,8 +118,8 @@ export async function callBoardTool(name, args = {}, env = {}) {
   if (name === "list_slices") {
     const state = await getState(workspacePath, storeOptions);
     let slices = state.slices;
-    if (typeof args.initiativeId === "string" && args.initiativeId) {
-      slices = slices.filter((s) => s.initiativeId === args.initiativeId);
+    if (typeof toolArgs.initiativeId === "string" && toolArgs.initiativeId) {
+      slices = slices.filter((s) => s.initiativeId === toolArgs.initiativeId);
     }
     return { ok: true, slices };
   }
@@ -131,7 +134,7 @@ export async function callBoardTool(name, args = {}, env = {}) {
   // Tool name binds role — never let args.action override `name`.
   const result = await dispatchAction(
     workspacePath,
-    { ...args, action: name },
+    { ...toolArgs, action: name },
     storeOptions,
   );
   return { ok: true, ...result };
@@ -141,7 +144,7 @@ export async function callBoardTool(name, args = {}, env = {}) {
  * MCP tool wrapper: structured JSON text; TransitionError → isError + allowedActions.
  * @param {string} name
  * @param {Record<string, unknown>} [args]
- * @param {{ workspacePath?: string, dataRoot?: string }} [env]
+ * @param {{ dataRoot?: string }} [env]
  */
 export async function handleMcpTool(name, args = {}, env = {}) {
   try {
@@ -154,7 +157,8 @@ export async function handleMcpTool(name, args = {}, env = {}) {
 
 /**
  * Build stdio-ready McpServer with named board tools.
- * @param {{ workspacePath?: string, dataRoot?: string }} [env]
+ * Tools require per-call `workspace`; env may only supply dataRoot for the store.
+ * @param {{ dataRoot?: string }} [env]
  */
 export function createHarnessBoardMcpServer(env = {}) {
   const server = new McpServer({
@@ -167,15 +171,15 @@ export function createHarnessBoardMcpServer(env = {}) {
 
   server.tool(
     "board_get",
-    "Read full harness-board state for the workspace (initiatives + slices).",
-    {},
+    "Read full harness-board state for the given workspace (initiatives + slices).",
+    { workspace: workspaceArg },
     run("board_get"),
   );
 
   server.tool(
     "list_slices",
-    "List slice cards; optional initiativeId filter.",
-    { initiativeId: z.string().optional() },
+    "List slice cards for the given workspace; optional initiativeId filter.",
+    { workspace: workspaceArg, initiativeId: z.string().optional() },
     run("list_slices"),
   );
 
@@ -183,6 +187,7 @@ export function createHarnessBoardMcpServer(env = {}) {
     "initiative_upsert",
     "Create or update an initiative swimlane header (orchestrator).",
     {
+      workspace: workspaceArg,
       planPath: z.string(),
       title: z.string(),
       id: z.string().optional(),
@@ -198,6 +203,7 @@ export function createHarnessBoardMcpServer(env = {}) {
     "slice_add",
     "Add a slice card in column ready (orchestrator).",
     {
+      workspace: workspaceArg,
       initiativeId: z.string(),
       title: z.string(),
       notes: z.string().optional(),
@@ -210,6 +216,7 @@ export function createHarnessBoardMcpServer(env = {}) {
     "slice_approve",
     "Approve a ready slice → approved (orchestrator).",
     {
+      workspace: workspaceArg,
       sliceId: z.string(),
       note: z.string().optional(),
     },
@@ -219,7 +226,7 @@ export function createHarnessBoardMcpServer(env = {}) {
   server.tool(
     "implementer_start",
     "Start or retry implement work: approved|implement → implement.",
-    { sliceId: z.string() },
+    { workspace: workspaceArg, sliceId: z.string() },
     run("implementer_start"),
   );
 
@@ -227,6 +234,7 @@ export function createHarnessBoardMcpServer(env = {}) {
     "implementer_submit",
     "Submit implement work: implement → review.",
     {
+      workspace: workspaceArg,
       sliceId: z.string(),
       summary: z.string(),
       filesTouched: z.array(z.string()).optional(),
@@ -238,6 +246,7 @@ export function createHarnessBoardMcpServer(env = {}) {
     "reviewer_verdict",
     "Reviewer verdict: approve→verify, revise→implement, bounce→blocked.",
     {
+      workspace: workspaceArg,
       sliceId: z.string(),
       verdict: z.enum(["approve", "revise", "bounce"]),
       findings: z.unknown().optional(),
@@ -249,6 +258,7 @@ export function createHarnessBoardMcpServer(env = {}) {
     "verifier_verdict",
     "Verifier verdict: pass→done, fail→implement, bounce|replan→blocked.",
     {
+      workspace: workspaceArg,
       sliceId: z.string(),
       verdict: z.enum(["pass", "fail", "bounce", "replan"]),
       evidence: z.unknown().optional(),
@@ -260,6 +270,7 @@ export function createHarnessBoardMcpServer(env = {}) {
     "human_unblock",
     "Unblock a slice: blocked → implement.",
     {
+      workspace: workspaceArg,
       sliceId: z.string(),
       reason: z.string().optional(),
     },
@@ -270,6 +281,7 @@ export function createHarnessBoardMcpServer(env = {}) {
     "park",
     "Park an initiative (explicit status).",
     {
+      workspace: workspaceArg,
       initiativeId: z.string(),
       reason: z.string().optional(),
     },

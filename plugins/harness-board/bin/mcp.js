@@ -3,10 +3,13 @@
  * MCP stdio entry. Cursor plugin cache does not include node_modules,
  * so we npm-install into the plugin root on first run (stdout kept quiet
  * so install noise cannot corrupt the MCP protocol).
+ *
+ * Tool targeting uses per-call `workspace` args — HARNESS_BOARD_WORKSPACE
+ * is not used for store selection.
  */
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const pluginRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -50,21 +53,18 @@ ensureDeps();
 const { StdioServerTransport } = await import(
   "@modelcontextprotocol/sdk/server/stdio.js"
 );
-const {
-  createHarnessBoardMcpServer,
-  isUnexpandedTemplate,
-  sanitizeWorkspacePath,
-} = await import("../lib/mcp.js");
-
-const workspacePath = sanitizeWorkspacePath(
-  process.env.HARNESS_BOARD_WORKSPACE,
+const { createHarnessBoardMcpServer, isUnexpandedTemplate } = await import(
+  "../lib/mcp.js"
 );
+
 const dataRootEnv = process.env.HARNESS_BOARD_DATA_ROOT;
 const dataRoot =
   dataRootEnv && !isUnexpandedTemplate(dataRootEnv)
-    ? sanitizeWorkspacePath(dataRootEnv)
+    ? resolve(dataRootEnv)
     : undefined;
 
-const server = createHarnessBoardMcpServer({ workspacePath, dataRoot });
+const server = createHarnessBoardMcpServer(
+  dataRoot ? { dataRoot } : {},
+);
 const transport = new StdioServerTransport();
 await server.connect(transport);

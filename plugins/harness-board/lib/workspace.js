@@ -78,6 +78,27 @@ export function readActiveWorkspace(dataRoot) {
 }
 
 /**
+ * Resolve a caller-supplied workspace for MCP tool calls.
+ * No env / active-workspace.txt fallback; never writes the active pointer.
+ * @param {unknown} candidate
+ * @returns {string}
+ */
+export function resolveExplicitWorkspace(candidate) {
+  if (typeof candidate !== "string" || !candidate.trim()) {
+    throw new Error(
+      "workspace is required (absolute path to the project root)",
+    );
+  }
+  const trimmed = candidate.trim();
+  if (isUnexpandedTemplate(trimmed)) {
+    throw new Error(
+      "workspace must be an absolute path (unexpanded template rejected)",
+    );
+  }
+  return resolve(expandHomePath(trimmed));
+}
+
+/**
  * Pick a usable workspace path. Plugin MCP env sometimes ships the literal
  * `${workspaceFolder}` string; never use that as a store key.
  * @param {string | undefined} candidate

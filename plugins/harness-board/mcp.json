@@ -2,10 +2,7 @@
   "mcpServers": {
     "harness-board": {
       "command": "node",
-      "args": ["${CURSOR_PLUGIN_ROOT}/bin/mcp.js"],
-      "env": {
-        "HARNESS_BOARD_WORKSPACE": "${workspaceFolder}"
-      }
+      "args": ["${CURSOR_PLUGIN_ROOT}/bin/mcp.js"]
     }
   }
 }
