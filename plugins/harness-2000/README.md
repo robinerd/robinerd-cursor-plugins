@@ -8,7 +8,7 @@ Cursor-native full lifecycle in **Agent mode**: judgment (§§1–6) then gated 
 
 Point Cursor at **the repository root** (`robinerd-cursor-plugins` — the folder that contains `.cursor-plugin/marketplace.json`). Enable **Harness 2000** and reload if needed.
 
-Optionally enable sibling **Harness Board** from the same marketplace for runtime slice tracking (MCP tools + local UI). Praxis soft-fails if the board MCP is unavailable. From `plugins/harness-board`, run `npm run board` to open the view-only kanban UI on a random localhost port.
+Optionally enable sibling **Harness Board** from the same marketplace for runtime slice tracking (MCP tools + local UI). Praxis soft-fails if the board MCP is unavailable. On every harness-board MCP tool call, always pass `workspace` (absolute path of the agent’s project root). To operate on another board, pass that workspace’s absolute path instead. From `plugins/harness-board`, run `npm run board` to open the view-only kanban UI on a random localhost port.
 
 ### Copy into `~/.cursor/plugins/local` (optional)
 

@@ -3,4 +3,4 @@ name: create-work-packages
 description: Edit plan §6 into executable slices
 ---
 
-Follow the **create-work-packages** skill. Touch only `## 6. Work breakdown`. Confirm slice shape with **ask-user** if ambiguous. Stay in Agent mode. After writing §6, call harness-board `slice_add` for each slice when MCP is available; soft-fail otherwise.
+Follow the **create-work-packages** skill. Touch only `## 6. Work breakdown`. Confirm slice shape with **ask-user** if ambiguous. Stay in Agent mode. After writing §6, call harness-board `slice_add` for each slice when MCP is available; always pass `workspace` (absolute path of the agent’s project root — or another workspace’s absolute path for cross-board work); soft-fail otherwise.

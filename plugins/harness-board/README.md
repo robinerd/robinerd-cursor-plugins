@@ -22,24 +22,23 @@ Override for tests / local runs:
 
 | Env | Purpose |
 |-----|---------|
-| `HARNESS_BOARD_WORKSPACE` | Optional default workspace for UI / actions (UI no longer requires this) |
-| `HARNESS_BOARD_DATA_ROOT` | Root instead of `~/.cursor/harness-board` |
+| `HARNESS_BOARD_DATA_ROOT` | Optional store root instead of `~/.cursor/harness-board` (used by `bin/mcp.js` and the board UI) |
+
+MCP tool targeting does **not** use env or a global pointer. Every MCP tool requires an absolute `workspace` argument per call. (`HARNESS_BOARD_WORKSPACE` is ignored if set.)
 
 ## Board UI (`npm run board`)
 
-No env vars required for the UI. The page shows a **left sidebar** of every board under `~/.cursor/harness-board/*/state.json`, ordered by `state.json` mtime (newest first). Click a board to load it (`/?workspace=…`). The UI polls `/api/boards` and reloads when the selected board’s mtime changes, or when `active-workspace` points at a different board (auto-follow).
+No env vars required for the UI. The page shows a **left sidebar** of every board under `~/.cursor/harness-board/*/state.json`, ordered by `state.json` mtime (newest first). Click a board to load it (`/?workspace=…`). The UI polls `/api/boards` and reloads only when the **currently selected** board’s mtime changes.
 
-MCP still resolves the store via `HARNESS_BOARD_WORKSPACE` / `${workspaceFolder}` and the `active-workspace.txt` pointer — separate from opening the UI.
+**Active** means the board has ≥1 initiative in `planning` | `building` | `integrating` (`done` / `parked` do not count). Multiple boards may be Active at once. Sidebar selection (browsing) is independent of Active — switching the viewed board does not clear Active marks elsewhere and does not auto-follow any pointer.
 
 ## Install
 
 1. Point Cursor at the **repository root** (`robinerd-cursor-plugins` — folder with `.cursor-plugin/marketplace.json`).
 2. Enable **Harness Board** beside **Harness 2000**, then reload if needed.
-3. Confirm MCP tools under **Settings → Tools & MCP** (`harness-board`: `board_get`, `list_slices`, transition tools).
+3. Confirm MCP tools under **Settings → Tools & MCP** (`harness-board`: `board_get`, `list_slices`, transition tools). Every tool requires `workspace`.
 
 On first MCP connect, `bin/mcp.js` runs `npm install --omit=dev` into the plugin install/cache directory if `@modelcontextprotocol/sdk` is missing (Cursor does not ship `node_modules` with plugins). Install logs go to stderr only so stdio MCP stays clean.
-
-If Cursor leaves `${workspaceFolder}` unexpanded in MCP env, the server falls back to the remembered active workspace / `process.cwd()` so the store is not keyed under a literal `${…}` path.
 
 ### MCP enable
 
@@ -49,11 +48,11 @@ Plugin root `mcp.json` is auto-discovered. It starts:
 node ${CURSOR_PLUGIN_ROOT}/bin/mcp.js
 ```
 
-with `HARNESS_BOARD_WORKSPACE=${workspaceFolder}`.
-
 - Prefer `${CURSOR_PLUGIN_ROOT}/bin/mcp.js` (plugin install root).
 - If a local install does not expand that variable, use a path relative to the plugin root: `./bin/mcp.js` (cwd is typically the plugin install path for plugin MCP).
-- Optional: set `HARNESS_BOARD_DATA_ROOT` in the MCP env for a custom store root.
+- Optional: set `HARNESS_BOARD_DATA_ROOT` in the MCP env for a custom store root (not for targeting a board).
+
+Pass absolute `workspace` on every tool call (agent root by default; any other absolute path is allowed for intentional cross-board work). Missing / empty / unexpanded `${…}` templates → structured error.
 
 UI remains separate: open the board with `npm run board` (not an MCP tool).
 
@@ -72,12 +71,14 @@ Server binds `127.0.0.1` on a free port and logs `http://127.0.0.1:<port>`.
 | Method | Path | Purpose |
 |--------|------|---------|
 | `GET` | `/` | Multi-board HTML (sidebar + selected board); `?workspace=` / `?hash=` |
-| `GET` | `/api/boards` | `{ boards, selectedWorkspace, activeWorkspace }` |
+| `GET` | `/api/boards` | `{ boards, selectedWorkspace }` — each board may include `active` / `hasActiveWork` |
 | `GET` | `/api/state` | Board JSON for `?workspace=` / `?hash=` (or selected default) |
-| `POST` | `/api/select` | `{ "workspace": "…" }` — remember active workspace |
+| `POST` | `/api/select` | `{ "workspace": "…" }` — acknowledged; selection is URL/client-side (does not write a global pointer) |
 | `POST` | `/api/action` | Named transition: `{ "action": "…", "workspace"?: "…", … }` |
 
 ## MCP tools
+
+Every tool requires `workspace` (absolute path). Store bucket = hash of that path. MCP does not read or update `active-workspace.txt`.
 
 | Tool | Role | Purpose |
 |------|------|---------|
@@ -106,7 +107,7 @@ bin/mcp.js            # stdio MCP entry
 lib/store.js
 lib/transitions.js
 lib/boards.js         # list / resolve multi-board
-lib/workspace.js      # active-workspace pointer
+lib/workspace.js      # path helpers (legacy pointer unused by MCP)
 lib/server.js         # HTTP + dispatchAction + multi-board HTML
 lib/mcp.js            # MCP tools → shared engine
 test/

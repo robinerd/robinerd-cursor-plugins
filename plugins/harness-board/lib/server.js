@@ -2,14 +2,7 @@ import http from "node:http";
 import { readFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve as pathResolve, sep } from "node:path";
 import { getState } from "./store.js";
-import {
-  listBoardSummaries,
-  resolveSelectedWorkspace,
-} from "./boards.js";
-import {
-  readActiveWorkspace,
-  rememberActiveWorkspace,
-} from "./workspace.js";
+import { resolveSelectedWorkspace } from "./boards.js";
 import {
   ACTIONS,
   SLICE_COLUMNS,
@@ -401,7 +394,6 @@ function renderSwimlanes(state) {
  * @typedef {object} RenderShellOptions
  * @property {Array<BoardSummary & { selected?: boolean, active?: boolean }>} [boards]
  * @property {string | null} [selectedWorkspace]
- * @property {string | null} [activeWorkspace]
  * @property {number} [selectedMtimeMs]
  */
 
@@ -415,7 +407,6 @@ export function renderBoardHtml(state, shell = {}) {
   const boards = shell.boards ?? [];
   const selectedWorkspace =
     shell.selectedWorkspace ?? state?.workspacePath ?? null;
-  const activeWorkspace = shell.activeWorkspace ?? null;
   const selectedMtimeMs = shell.selectedMtimeMs ?? 0;
   const swimlanes = state
     ? renderSwimlanes(state)
@@ -675,8 +666,7 @@ export function renderBoardHtml(state, shell = {}) {
       }
       <main id="board"
         data-workspace="${escapeHtml(selectedWorkspace || "")}"
-        data-mtime-ms="${escapeHtml(String(selectedMtimeMs))}"
-        data-active-workspace="${escapeHtml(activeWorkspace || "")}">
+        data-mtime-ms="${escapeHtml(String(selectedMtimeMs))}">
         ${swimlanes}
       </main>
       <p class="meta" data-updated-at>Updated ${escapeHtml(state?.updatedAt || "")}</p>
@@ -689,7 +679,6 @@ export function renderBoardHtml(state, shell = {}) {
   if (!boardEl) return;
   var selectedPath = boardEl.getAttribute("data-workspace") || "";
   var lastMtime = Number(boardEl.getAttribute("data-mtime-ms") || "0");
-  var lastActive = boardEl.getAttribute("data-active-workspace") || "";
 
   function norm(p) {
     var bs = String.fromCharCode(92);
@@ -697,21 +686,18 @@ export function renderBoardHtml(state, shell = {}) {
   }
 
   function poll() {
-    fetch("/api/boards", { cache: "no-store" })
+    var url = "/api/boards";
+    if (selectedPath) {
+      url += "?workspace=" + encodeURIComponent(selectedPath);
+    }
+    fetch(url, { cache: "no-store" })
       .then(function (r) { return r.json(); })
       .then(function (data) {
         var boards = data.boards || [];
-        var selected = boards.find(function (b) { return b.selected; });
-        if (selected && Number(selected.mtimeMs) !== lastMtime) {
-          location.reload();
-          return;
-        }
-        var active = data.activeWorkspace || "";
-        if (active && norm(active) !== norm(selectedPath)) {
-          location.href = "/?workspace=" + encodeURIComponent(active);
-          return;
-        }
-        if (active && active !== lastActive) {
+        var current = boards.find(function (b) {
+          return norm(b.workspacePath) === norm(selectedPath);
+        }) || boards.find(function (b) { return b.selected; });
+        if (current && Number(current.mtimeMs) !== lastMtime) {
           location.reload();
         }
       })
@@ -760,28 +746,25 @@ function sendJson(res, status, payload) {
  * @param {string | null | undefined} requested
  */
 async function resolveSelection(storeOptions, defaultWorkspace, requested) {
-  const activeWorkspace = readActiveWorkspace(storeOptions.dataRoot) ?? null;
   const { workspacePath, boards } = await resolveSelectedWorkspace({
     dataRoot: storeOptions.dataRoot,
     requested: requested ?? null,
     defaultWorkspace: defaultWorkspace ?? null,
-    activeWorkspace,
   });
-  return { workspacePath, boards, activeWorkspace };
+  return { workspacePath, boards };
 }
 
 /**
+ * Mark selected (view) vs Active (has ongoing initiative work). Independent.
  * @param {BoardSummary[]} boards
  * @param {string | null} selectedWorkspace
- * @param {string | null} activeWorkspace
  */
-function annotateBoards(boards, selectedWorkspace, activeWorkspace) {
+function annotateBoards(boards, selectedWorkspace) {
   const sel = normPath(selectedWorkspace);
-  const act = normPath(activeWorkspace);
   return boards.map((b) => ({
     ...b,
     selected: normPath(b.workspacePath) === sel,
-    active: act !== "" && normPath(b.workspacePath) === act,
+    active: Boolean(b.hasActiveWork),
   }));
 }
 
@@ -808,17 +791,15 @@ export function createBoardServer(options = {}) {
           url.searchParams.get("workspace") ||
           url.searchParams.get("hash") ||
           null;
-        const { workspacePath, boards, activeWorkspace } =
-          await resolveSelection(storeOptions, defaultWorkspace, requested);
-        const annotated = annotateBoards(
-          boards,
-          workspacePath,
-          activeWorkspace,
+        const { workspacePath, boards } = await resolveSelection(
+          storeOptions,
+          defaultWorkspace,
+          requested,
         );
+        const annotated = annotateBoards(boards, workspacePath);
         sendJson(res, 200, {
           boards: annotated,
           selectedWorkspace: workspacePath,
-          activeWorkspace,
         });
         return;
       }
@@ -860,7 +841,7 @@ export function createBoardServer(options = {}) {
           sendJson(res, 400, { ok: false, error: "workspace is required" });
           return;
         }
-        rememberActiveWorkspace(workspace, storeOptions.dataRoot);
+        // Selection is client-side (?workspace=); do not write active-workspace.txt.
         sendJson(res, 200, { ok: true, workspace });
         return;
       }
@@ -897,7 +878,6 @@ export function createBoardServer(options = {}) {
             body,
             storeOptions,
           );
-          rememberActiveWorkspace(workspacePath, storeOptions.dataRoot);
           sendJson(res, 200, { ok: true, ...result });
         } catch (err) {
           if (err instanceof TransitionError) {
@@ -995,16 +975,12 @@ export function createBoardServer(options = {}) {
           url.searchParams.get("workspace") ||
           url.searchParams.get("hash") ||
           null;
-        const { workspacePath, boards, activeWorkspace } =
-          await resolveSelection(storeOptions, defaultWorkspace, requested);
-        if (requested && workspacePath) {
-          rememberActiveWorkspace(workspacePath, storeOptions.dataRoot);
-        }
-        const annotated = annotateBoards(
-          boards,
-          workspacePath,
-          activeWorkspace,
+        const { workspacePath, boards } = await resolveSelection(
+          storeOptions,
+          defaultWorkspace,
+          requested,
         );
+        const annotated = annotateBoards(boards, workspacePath);
         const selectedSummary = annotated.find((b) => b.selected);
         /** @type {BoardState | null} */
         let state = null;
@@ -1014,7 +990,6 @@ export function createBoardServer(options = {}) {
         const html = renderBoardHtml(state, {
           boards: annotated,
           selectedWorkspace: workspacePath,
-          activeWorkspace,
           selectedMtimeMs: selectedSummary?.mtimeMs ?? 0,
         });
         res.writeHead(200, {
