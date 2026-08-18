@@ -32,7 +32,7 @@ No env vars required for the UI. The page shows a **left sidebar** of every boar
 
 **Active** means the board has ≥1 initiative in `planning` | `building` | `integrating` (`done` / `parked` do not count). Multiple boards may be Active at once. Sidebar selection (browsing) is independent of Active — switching the viewed board does not clear Active marks elsewhere and does not auto-follow any pointer.
 
-The unread-style **attention dot** (sidebar row and initiative header) is independent of Active. It does **not** clear on viewing the board. Parked and done never show it. Blocked slices auto-derive the dot. AskQuestion / post-slice gates set `awaitingHuman` via `initiative_upsert` (orchestrator / ask-user / assess-release).
+The unread-style **attention dot** (sidebar row and initiative header) is independent of Active. It means an **unacknowledged** wait in the matching chat (`awaitingHuman`), not a Blocked column. It does **not** clear on viewing the board. It **does** clear when the human replies in chat (including “I’ll get back to you later”). Parked and done never show it. AskQuestion / post-slice gates set `awaitingHuman` via `initiative_upsert` (orchestrator / ask-user / assess-release).
 
 ## Install
 

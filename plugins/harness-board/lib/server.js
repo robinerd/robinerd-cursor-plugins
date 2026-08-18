@@ -401,7 +401,7 @@ function renderSwimlanes(state) {
         workspacePath && planPath ? planViewHref(workspacePath, planPath) : "#";
       const fileHref = abs ? toFileUrl(abs) : "";
       const titleAttr = fileHref ? ` title="${escapeHtml(fileHref)}"` : "";
-      const needsAttention = initiativeNeedsAttention(initiative, slices);
+      const needsAttention = initiativeNeedsAttention(initiative);
       const attentionAttr = needsAttention ? ` data-attention="true"` : "";
       const titleAria = needsAttention
         ? ` aria-label="${escapeHtml(`${initiative.title} — Needs your input`)}"`
