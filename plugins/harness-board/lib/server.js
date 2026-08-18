@@ -45,6 +45,7 @@ const COLUMN_LABELS = Object.freeze({
  * @property {string} [workspacePath] Optional default workspace (e2e / HARNESS_BOARD_WORKSPACE).
  * @property {string} [dataRoot]
  * @property {string} [host]
+ * @property {number} [port]
  */
 
 /**
@@ -81,6 +82,8 @@ export async function dispatchAction(workspacePath, body, options = {}) {
           planPath: body.planPath,
           title: body.title,
           blurb: typeof body.blurb === "string" ? body.blurb : undefined,
+          nextSteps:
+            typeof body.nextSteps === "string" ? body.nextSteps : undefined,
           status:
             typeof body.status === "string"
               ? /** @type {import("./store.js").InitiativeStatus} */ (body.status)
@@ -424,6 +427,12 @@ function renderSwimlanes(state) {
       const ariaExpanded = collapsed ? "false" : "true";
       const toggleLabel = collapsed ? "Expand initiative" : "Collapse initiative";
       const detailsId = `initiative-details-${escapeHtml(initiative.id)}`;
+      const nextSteps =
+        initiative.status === "integrating" &&
+        typeof initiative.nextSteps === "string" &&
+        initiative.nextSteps.trim()
+          ? `<span class="initiative-next-steps"><strong>Next steps:</strong> ${escapeHtml(initiative.nextSteps)}</span>`
+          : "";
 
       return `
             <section class="initiative${collapsedClass}" data-initiative-id="${escapeHtml(initiative.id)}" data-status="${escapeHtml(initiative.status)}"${attentionAttr}${collapsedAttr}>
@@ -436,7 +445,7 @@ function renderSwimlanes(state) {
                   ${attentionDot}
                   <span class="badge status-${escapeHtml(initiative.status)}" data-status-badge>${escapeHtml(statusLabel)}</span>
                 </div>
-                <p class="initiative-blurb" data-blurb>${escapeHtml(initiative.blurb || "")}</p>
+                <p class="initiative-blurb" data-blurb>${escapeHtml(initiative.blurb || "")}${nextSteps}</p>
               </header>
               <div class="initiative-details" id="${detailsId}">
                 <a class="plan-link" data-plan-link href="${escapeHtml(href)}"${titleAttr}>${escapeHtml(planPath)}</a>
@@ -701,6 +710,13 @@ export function renderBoardHtml(state, shell = {}) {
       margin: 0.5rem 0 0.35rem;
       color: var(--muted);
       font-size: 0.95rem;
+    }
+    .initiative-next-steps {
+      display: block;
+      margin-top: 0.45rem;
+    }
+    .initiative-next-steps strong {
+      color: #111827;
     }
     .plan-link {
       color: var(--accent);
@@ -1181,17 +1197,18 @@ export function createBoardServer(options = {}) {
 }
 
 /**
- * Bind a random free port on localhost and print the URL.
+ * Bind the board server on localhost and print the URL.
  * @param {BoardServerOptions} options
  * @returns {Promise<{ server: http.Server, url: string, port: number }>}
  */
 export function startBoardServer(options = {}) {
   const host = options.host ?? "127.0.0.1";
+  const port = options.port ?? 4173;
   const server = createBoardServer(options);
 
   return new Promise((resolve, reject) => {
     server.once("error", reject);
-    server.listen(0, host, () => {
+    server.listen(port, host, () => {
       const addr = server.address();
       if (!addr || typeof addr === "string") {
         reject(new Error("failed to bind server"));

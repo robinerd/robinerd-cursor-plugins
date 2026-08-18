@@ -4,6 +4,7 @@ import {
   initiativeCollapsedByDefault,
   renderBoardHtml,
   sortInitiativesForDisplay,
+  startBoardServer,
 } from "../lib/server.js";
 
 /**
@@ -20,6 +21,14 @@ function init(id, status, updatedAt) {
     status,
     updatedAt,
   };
+}
+
+function initiativeHtml(html, id) {
+  const match = html.match(
+    new RegExp(`<section class="initiative[^>]*data-initiative-id="${id}"[\\s\\S]*?</section>`),
+  );
+  assert.ok(match, `initiative ${id} should render`);
+  return match[0];
 }
 
 test("sortInitiativesForDisplay: not done first then done; newest first within each", () => {
@@ -58,6 +67,29 @@ test("initiativeCollapsedByDefault: done only", () => {
   assert.equal(initiativeCollapsedByDefault("building"), false);
   assert.equal(initiativeCollapsedByDefault("integrating"), false);
   assert.equal(initiativeCollapsedByDefault("parked"), false);
+});
+
+test("startBoardServer: defaults to port 4173", async () => {
+  const { server, port } = await startBoardServer();
+  try {
+    assert.equal(port, 4173);
+  } finally {
+    await new Promise((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
+});
+
+test("startBoardServer: preserves an explicit port override", async () => {
+  const { server, port } = await startBoardServer({ port: 0 });
+  try {
+    assert.notEqual(port, 4173);
+    assert.ok(port > 0);
+  } finally {
+    await new Promise((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
 });
 
 test("renderBoardHtml: done starts collapsed; others expanded; toggle present", () => {
@@ -112,4 +144,39 @@ test("renderBoardHtml: done starts collapsed; others expanded; toggle present", 
   );
 
   assert.match(html, /harness-board:initiative-collapsed/);
+});
+
+test("renderBoardHtml: Integrating summaries show structured next steps in expanded and collapsed headers", () => {
+  const html = renderBoardHtml({
+    workspacePath: "/tmp/ws",
+    updatedAt: "2026-08-18T00:00:00.000Z",
+    initiatives: [
+      {
+        ...init("integrating-1", "integrating", "2026-08-18T00:00:00.000Z"),
+        blurb: "Stable 127.0.0.1:4173 default for npm run board",
+        nextSteps: "awaiting final human check",
+      },
+      {
+        ...init("integrating-2", "integrating", "2026-08-18T00:00:00.000Z"),
+        blurb: "A summary",
+        nextSteps: "review the rendered board",
+      },
+    ],
+    slices: [],
+  });
+
+  const expanded = initiativeHtml(html, "integrating-1");
+  assert.match(
+    expanded,
+    /Stable 127\.0\.0\.1:4173 default for npm run board<span class="initiative-next-steps"><strong>Next steps:<\/strong> awaiting final human check<\/span>/,
+  );
+  assert.doesNotMatch(expanded, /data-collapsed="true"/);
+
+  const collapsedHtml = html.replace(
+    'data-initiative-id="integrating-2"',
+    'data-initiative-id="integrating-2" data-collapsed="true"',
+  );
+  const collapsed = initiativeHtml(collapsedHtml, "integrating-2");
+  assert.match(collapsed, /<strong>Next steps:<\/strong> review the rendered board/);
+  assert.match(collapsed, /class="initiative-details"/);
 });

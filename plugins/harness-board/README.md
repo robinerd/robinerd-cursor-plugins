@@ -34,7 +34,7 @@ No env vars required for the UI. The page shows a **left sidebar** of every boar
 
 The unread-style **attention dot** (sidebar row and initiative header) is independent of Active. It means an **unacknowledged** wait in the matching chat (`awaitingHuman`), not a Blocked column. It does **not** clear on viewing the board. It **does** clear when the human replies in chat (including “I’ll get back to you later”). Parked and done never show it. AskQuestion / post-slice gates set `awaitingHuman` via `initiative_upsert` (orchestrator / ask-user / assess-release).
 
-Each initiative box has a **left disclosure arrow**. Collapsed boxes show the title, status, and blurb only (plan URL and slice columns hidden). **Done** initiatives start collapsed; other statuses start expanded. Toggles are remembered in `localStorage` so poll reloads do not reset them.
+Each initiative box has a **left disclosure arrow**. Collapsed boxes show the title, status, and blurb only (plan URL and slice columns hidden). Integrating initiatives may also show an optional bold **Next steps:** line in that header. **Done** initiatives start collapsed; other statuses start expanded. Toggles are remembered in `localStorage` so poll reloads do not reset them.
 
 ## Install
 
@@ -65,12 +65,12 @@ UI remains separate: open the board with `npm run board` (not an MCP tool).
 | Command | Purpose |
 |---------|---------|
 | `npm test` | Store + transition + boards + e2e + MCP smoke tests |
-| `npm run board` | Local multi-board server (random port, prints URL; no workspace env required) |
+| `npm run board` | Local multi-board server (port 4173 by default, prints URL; no workspace env required) |
 | `npm run mcp` | stdio MCP server (Cursor launches this via `mcp.json`) |
 
 ## HTTP API
 
-Server binds `127.0.0.1` on a free port and logs `http://127.0.0.1:<port>`.
+Server binds `127.0.0.1:4173` by default and logs `http://127.0.0.1:4173`. In-process callers can pass `options.port` to select another port, including `0` for an ephemeral port.
 
 | Method | Path | Purpose |
 |--------|------|---------|
@@ -88,7 +88,7 @@ Every tool requires `workspace` (absolute path). Store bucket = hash of that pat
 |------|------|---------|
 | `board_get` | any | Full board state |
 | `list_slices` | any | Slice list (optional `initiativeId`) |
-| `initiative_upsert` | orchestrator | Create/update initiative header |
+| `initiative_upsert` | orchestrator | Create/update initiative header (`blurb` and optional `nextSteps`) |
 | `slice_add` | orchestrator | Add slice in `ready` |
 | `slice_approve` | orchestrator | `ready` → `approved` |
 | `implementer_start` | implementer | `approved`\|`implement` → `implement` |

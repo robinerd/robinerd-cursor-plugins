@@ -13,6 +13,7 @@ import { expandHomePath } from "./workspace.js";
  * @property {string} planPath
  * @property {string} title
  * @property {string} blurb
+ * @property {string} [nextSteps]
  * @property {InitiativeStatus} status
  * @property {boolean} [awaitingHuman] Human reply needed; missing treated as false
  * @property {string} updatedAt ISO-8601
@@ -175,6 +176,9 @@ export async function upsertInitiative(workspacePath, input, options = {}) {
     initiative.planPath = input.planPath ?? initiative.planPath;
     initiative.title = input.title ?? initiative.title;
     initiative.blurb = input.blurb ?? initiative.blurb;
+    if (input.nextSteps !== undefined) {
+      initiative.nextSteps = input.nextSteps;
+    }
     // Preserve existing status when omitted on update.
     if (input.status !== undefined) {
       if (!INITIATIVE_STATUSES.has(input.status)) {
@@ -196,6 +200,7 @@ export async function upsertInitiative(workspacePath, input, options = {}) {
       planPath: input.planPath,
       title: input.title,
       blurb: input.blurb ?? "",
+      nextSteps: input.nextSteps,
       status,
       awaitingHuman: input.awaitingHuman === true,
       updatedAt: now,

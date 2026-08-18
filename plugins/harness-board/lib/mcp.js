@@ -192,6 +192,7 @@ export function createHarnessBoardMcpServer(env = {}) {
       title: z.string(),
       id: z.string().optional(),
       blurb: z.string().optional(),
+      nextSteps: z.string().optional(),
       status: z
         .enum(["planning", "building", "integrating", "done", "parked"])
         .optional(),
