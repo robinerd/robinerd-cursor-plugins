@@ -12,6 +12,7 @@ import {
   resolveSelectedWorkspace,
 } from "../lib/boards.js";
 import { rememberActiveWorkspace } from "../lib/workspace.js";
+import { workspaceHash } from "../lib/store.js";
 
 /**
  * @param {string} dataRoot
@@ -26,8 +27,9 @@ async function writeBoard(
   mtimeMs,
   initiatives = [],
   slices = [],
+  folderHash = hashForWorkspace(workspacePath),
 ) {
-  const hash = hashForWorkspace(workspacePath);
+  const hash = folderHash;
   const dir = join(dataRoot, hash);
   await mkdir(dir, { recursive: true });
   const stateFile = join(dir, "state.json");
@@ -273,6 +275,54 @@ test("resolveSelectedWorkspace ignores active-workspace pointer; prefers request
       defaultWorkspace: older,
     });
     assert.equal(byDefault.workspacePath, older);
+  } finally {
+    await rm(dataRoot, { recursive: true, force: true });
+  }
+});
+
+test("listBoardSummaries collapses drive-case and slash duplicates", async () => {
+  const dataRoot = await mkdtemp(join(tmpdir(), "harness-board-dedupe-"));
+  try {
+    const lower = "d:\\workspace\\dup-board";
+    const upper = "D:\\workspace\\dup-board";
+    const slashed = "D:/workspace/dup-board/";
+    await writeBoard(
+      dataRoot,
+      lower,
+      Date.UTC(2024, 0, 1),
+      [{ status: "done" }],
+      [],
+      hashForWorkspace(upper),
+    );
+    await writeBoard(
+      dataRoot,
+      upper,
+      Date.UTC(2025, 0, 1),
+      [{ status: "planning", awaitingHuman: true }],
+      [],
+      workspaceHash(upper),
+    );
+    await writeBoard(
+      dataRoot,
+      slashed,
+      Date.UTC(2024, 6, 1),
+      [{ status: "parked" }],
+      [],
+      workspaceHash(slashed),
+    );
+
+    const boards = await listBoardSummaries(dataRoot);
+    assert.equal(boards.length, 1);
+    assert.equal(boards[0].workspacePath, "D:\\workspace\\dup-board");
+    assert.equal(boards[0].hash, hashForWorkspace(upper));
+    assert.equal(boards[0].hasActiveWork, true);
+    assert.equal(boards[0].hasAttention, true);
+
+    const selected = await resolveSelectedWorkspace({
+      dataRoot,
+      requested: "  d:/workspace/dup-board\\  ",
+    });
+    assert.equal(selected.workspacePath, "D:\\workspace\\dup-board");
   } finally {
     await rm(dataRoot, { recursive: true, force: true });
   }

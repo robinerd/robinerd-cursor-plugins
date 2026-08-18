@@ -1,6 +1,11 @@
 import { readdir, readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
-import { defaultDataRoot, workspaceHash } from "./store.js";
+import { join, posix } from "node:path";
+import { defaultDataRoot, workspaceBucketHash } from "./store.js";
+import {
+  canonicalizeWorkspacePath,
+  looksWindowsPath,
+  workspaceIdentityKey,
+} from "./workspace.js";
 
 /** Initiative statuses that mark a board as having Active work (UI). */
 const ACTIVE_INITIATIVE_STATUSES = new Set([
@@ -108,7 +113,7 @@ export async function listBoardSummaries(dataRoot) {
           typeof parsed.workspacePath === "string" &&
           parsed.workspacePath.trim()
         ) {
-          workspacePath = parsed.workspacePath.trim();
+          workspacePath = displayWorkspacePath(parsed.workspacePath);
         }
         hasActiveWork = boardHasActiveWork(parsed);
         hasAttention = boardHasAttention(parsed);
@@ -129,7 +134,7 @@ export async function listBoardSummaries(dataRoot) {
   }
 
   boards.sort((a, b) => b.mtimeMs - a.mtimeMs || a.workspacePath.localeCompare(b.workspacePath));
-  return boards;
+  return dedupeBoardSummaries(boards);
 }
 
 /**
@@ -144,8 +149,8 @@ export async function listBoardSummaries(dataRoot) {
  */
 export async function resolveSelectedWorkspace(opts = {}) {
   const boards = await listBoardSummaries(opts.dataRoot);
-  const byPath = new Map(
-    boards.map((b) => [b.workspacePath.replace(/\\/g, "/").toLowerCase(), b]),
+  const byIdentity = new Map(
+    boards.map((b) => [workspaceIdentityKey(b.workspacePath), b]),
   );
   const byHash = new Map(boards.map((b) => [b.hash, b]));
 
@@ -158,10 +163,10 @@ export async function resolveSelectedWorkspace(opts = {}) {
     const trimmed = value.trim();
     if (!trimmed) return null;
     if (byHash.has(trimmed)) return byHash.get(trimmed).workspacePath;
-    const norm = trimmed.replace(/\\/g, "/").toLowerCase();
-    if (byPath.has(norm)) return byPath.get(norm).workspacePath;
+    const ident = workspaceIdentityKey(trimmed);
+    if (byIdentity.has(ident)) return byIdentity.get(ident).workspacePath;
     // Allow selecting a workspace that has no state file yet (e2e / first write).
-    return trimmed;
+    return canonicalizeWorkspacePath(trimmed);
   }
 
   const requested = match(opts.requested);
@@ -182,5 +187,75 @@ export async function resolveSelectedWorkspace(opts = {}) {
  * @returns {string}
  */
 export function hashForWorkspace(workspacePath) {
-  return workspaceHash(workspacePath);
+  return workspaceBucketHash(workspacePath);
+}
+
+/**
+ * Canonicalize when the value is an absolute POSIX or Windows path; leave
+ * hash-folder fallback labels alone.
+ * @param {string} workspacePath
+ * @returns {string}
+ */
+function displayWorkspacePath(workspacePath) {
+  const trimmed = workspacePath.trim();
+  if (looksWindowsPath(trimmed) || posix.isAbsolute(trimmed)) {
+    return canonicalizeWorkspacePath(trimmed);
+  }
+  return trimmed;
+}
+
+/**
+ * One sidebar row per logical workspace (drive case, slashes, trailing junk).
+ * @param {BoardSummary[]} boards
+ * @returns {BoardSummary[]}
+ */
+function dedupeBoardSummaries(boards) {
+  /** @type {Map<string, BoardSummary>} */
+  const byIdentity = new Map();
+  for (const board of boards) {
+    const ident =
+      looksWindowsPath(board.workspacePath) ||
+      posix.isAbsolute(String(board.workspacePath).trim())
+        ? workspaceIdentityKey(board.workspacePath)
+        : board.hash;
+    const existing = byIdentity.get(ident);
+    if (!existing) {
+      byIdentity.set(ident, board);
+      continue;
+    }
+    byIdentity.set(ident, mergeDuplicateBoards(existing, board));
+  }
+  const deduped = [...byIdentity.values()];
+  deduped.sort(
+    (a, b) => b.mtimeMs - a.mtimeMs || a.workspacePath.localeCompare(b.workspacePath),
+  );
+  return deduped;
+}
+
+/**
+ * @param {BoardSummary} a
+ * @param {BoardSummary} b
+ * @returns {BoardSummary}
+ */
+function mergeDuplicateBoards(a, b) {
+  const wantHash = workspaceBucketHash(a.workspacePath);
+  const aCanonical = a.hash === wantHash;
+  const bCanonical = b.hash === wantHash;
+  const primary =
+    aCanonical && !bCanonical
+      ? a
+      : bCanonical && !aCanonical
+        ? b
+        : a.mtimeMs >= b.mtimeMs
+          ? a
+          : b;
+  const mtimeMs = Math.max(a.mtimeMs, b.mtimeMs);
+  const newer = a.mtimeMs >= b.mtimeMs ? a : b;
+  return {
+    ...primary,
+    mtimeMs,
+    mtimeIso: newer.mtimeIso,
+    hasActiveWork: a.hasActiveWork || b.hasActiveWork,
+    hasAttention: a.hasAttention || b.hasAttention,
+  };
 }

@@ -12,7 +12,9 @@ import {
   saveState,
   statePathFor,
   upsertInitiative,
+  workspaceBucketHash,
   workspaceHash,
+  workspaceIdentityKey,
 } from "../lib/store.js";
 import { expandHomePath, sanitizeWorkspacePath } from "../lib/workspace.js";
 
@@ -203,7 +205,7 @@ test("saveState writes under dataRoot/hash/state.json", async () => {
     const key = canonicalizeWorkspacePath(ws);
     const state = emptyState(ws);
     await saveState(state, { dataRoot });
-    const expected = join(dataRoot, workspaceHash(key), "state.json");
+    const expected = join(dataRoot, workspaceBucketHash(key), "state.json");
     const raw = await readFile(expected, "utf8");
     assert.ok(raw.includes(key));
   } finally {
@@ -232,11 +234,122 @@ test("load then save stay on one canonical bucket", async () => {
 
     const dirs = await boardDirs(dataRoot);
     assert.equal(dirs.length, 1);
-    assert.equal(dirs[0], workspaceHash(canonicalizeWorkspacePath(good)));
+    assert.equal(dirs[0], workspaceBucketHash(good));
 
     const state = await getState(bad, { dataRoot });
     assert.equal(state.workspacePath, canonicalizeWorkspacePath(good));
     assert.equal(state.initiatives.length, 2);
+  } finally {
+    await rm(dataRoot, { recursive: true, force: true });
+  }
+});
+
+test("canonicalizeWorkspacePath unifies drive case, slashes, trailing junk", () => {
+  const canonical = "D:\\workspace\\foo";
+  const variants = [
+    "d:\\workspace\\foo",
+    "D:/workspace/foo",
+    "d:/workspace/foo/",
+    "D:\\workspace\\foo\\",
+    "  d:\\workspace\\foo\\  ",
+    "  D:/workspace/foo/  ",
+    "\\\\?\\D:\\workspace\\foo",
+    "\\\\?\\d:\\workspace\\foo\\",
+  ];
+  for (const v of variants) {
+    assert.equal(canonicalizeWorkspacePath(v), canonical, v);
+    assert.equal(workspaceIdentityKey(v), workspaceIdentityKey(canonical), v);
+    assert.equal(workspaceBucketHash(v), workspaceBucketHash(canonical), v);
+  }
+
+  assert.equal(
+    canonicalizeWorkspacePath("/tmp/foo/"),
+    canonicalizeWorkspacePath("/tmp/foo"),
+  );
+  assert.equal(
+    canonicalizeWorkspacePath("  /tmp/foo/  "),
+    canonicalizeWorkspacePath("/tmp/foo"),
+  );
+  assert.notEqual(
+    workspaceIdentityKey("/tmp/Foo"),
+    workspaceIdentityKey("/tmp/foo"),
+  );
+
+  assert.equal(
+    canonicalizeWorkspacePath("\\\\server\\share\\proj\\"),
+    "\\\\server\\share\\proj",
+  );
+  assert.equal(
+    workspaceIdentityKey("\\\\Server\\Share\\proj"),
+    workspaceIdentityKey("\\\\server\\share\\proj\\"),
+  );
+});
+
+test("D: vs d: and slash variants share one store bucket", async () => {
+  const dataRoot = await mkdtempSafe();
+  try {
+    const a = "d:\\workspace\\case-dup";
+    const b = "D:/workspace/case-dup/";
+    const c = "  D:\\workspace\\case-dup\\  ";
+    await upsertInitiative(a, { planPath: "plans/a.md", title: "From d:" }, { dataRoot });
+    await upsertInitiative(b, { planPath: "plans/b.md", title: "From D:/" }, { dataRoot });
+    await upsertInitiative(c, { planPath: "plans/c.md", title: "From padded" }, { dataRoot });
+
+    const dirs = await boardDirs(dataRoot);
+    assert.equal(dirs.length, 1);
+    assert.equal(dirs[0], workspaceBucketHash(a));
+
+    const state = await getState("D:\\workspace\\case-dup", { dataRoot });
+    assert.equal(state.workspacePath, "D:\\workspace\\case-dup");
+    assert.equal(state.initiatives.length, 3);
+    assert.equal(statePathFor(a, { dataRoot }), statePathFor(b, { dataRoot }));
+  } finally {
+    await rm(dataRoot, { recursive: true, force: true });
+  }
+});
+
+test("orphan drive-letter bucket merges into canonical and is deleted", async () => {
+  const dataRoot = await mkdtempSafe();
+  try {
+    const pretty = "D:\\workspace\\orphan-case";
+    const oldRaw = "D:\\workspace\\orphan-case";
+    const oldHash = workspaceHash(oldRaw);
+    const canonicalHash = workspaceBucketHash(pretty);
+    assert.notEqual(oldHash, canonicalHash);
+
+    const orphanDir = join(dataRoot, oldHash);
+    await mkdir(orphanDir, { recursive: true });
+    await writeFile(
+      join(orphanDir, "state.json"),
+      `${JSON.stringify(
+        {
+          workspacePath: oldRaw,
+          initiatives: [
+            {
+              id: "init-case-orphan",
+              planPath: "plans/orphan.md",
+              title: "Case orphan",
+              blurb: "",
+              status: "planning",
+              updatedAt: "2026-01-01T00:00:00.000Z",
+            },
+          ],
+          slices: [],
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const state = await getState(pretty, { dataRoot });
+    assert.equal(state.workspacePath, pretty);
+    assert.ok(state.initiatives.some((i) => i.id === "init-case-orphan"));
+
+    const dirs = await boardDirs(dataRoot);
+    assert.equal(dirs.length, 1);
+    assert.equal(dirs[0], canonicalHash);
   } finally {
     await rm(dataRoot, { recursive: true, force: true });
   }
@@ -250,7 +363,7 @@ test("orphan tilde bucket merges into canonical and is deleted", async () => {
     // Pre-canonical bug: resolve does not expand ~, so this hashed differently.
     const badRaw = `${home}/~/Documents/GitHub/cactus-orphan-test`;
     const orphanHash = workspaceHash(badRaw);
-    const canonicalHash = workspaceHash(canonicalizeWorkspacePath(good));
+    const canonicalHash = workspaceBucketHash(good);
     assert.notEqual(orphanHash, canonicalHash);
 
     const orphanDir = join(dataRoot, orphanHash);

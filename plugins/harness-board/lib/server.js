@@ -1,8 +1,9 @@
 import http from "node:http";
 import { readFile } from "node:fs/promises";
-import { isAbsolute, relative, resolve as pathResolve, sep } from "node:path";
+import { posix, win32 } from "node:path";
 import { getState } from "./store.js";
 import { initiativeNeedsAttention, resolveSelectedWorkspace } from "./boards.js";
+import { pathApiFor, usesWindowsPathApi } from "./workspace.js";
 import {
   ACTIONS,
   SLICE_COLUMNS,
@@ -282,19 +283,43 @@ export function resolveSafePlanPath(workspacePath, planPath) {
   ) {
     return null;
   }
-  const root = pathResolve(workspacePath.trim());
-  const candidate = isAbsolute(planPath.trim())
-    ? pathResolve(planPath.trim())
-    : pathResolve(root, planPath.trim());
-  const rel = relative(root, candidate);
-  if (rel.startsWith("..") || isAbsolute(rel)) {
+  const rootRaw = workspacePath.trim();
+  const planRaw = planPath.trim();
+  const rootApi = pathApiFor(rootRaw);
+  const root = rootApi.resolve(rootRaw);
+
+  const planIsWinAbs = usesWindowsPathApi(planRaw) && win32.isAbsolute(planRaw);
+  const planIsPosixAbs = posix.isAbsolute(planRaw) && !planIsWinAbs;
+
+  /** @type {import("node:path").PlatformPath} */
+  let candApi;
+  let candidate;
+  if (planIsWinAbs) {
+    candApi = win32;
+    candidate = win32.resolve(planRaw);
+  } else if (planIsPosixAbs) {
+    candApi = posix;
+    candidate = posix.resolve(planRaw);
+  } else {
+    candApi = rootApi;
+    candidate = rootApi.resolve(root, planRaw);
+  }
+
+  if (planIsWinAbs !== usesWindowsPathApi(root) && (planIsWinAbs || planIsPosixAbs)) {
     return null;
   }
+
+  const rel = candApi.relative(root, candidate);
+  if (rel.startsWith("..") || candApi.isAbsolute(rel)) {
+    return null;
+  }
+  const sep = candApi.sep;
   const rootPrefix = root.endsWith(sep) ? root : root + sep;
-  const candNorm = candidate.toLowerCase();
-  const rootNorm = root.toLowerCase();
-  const prefixNorm = rootPrefix.toLowerCase();
-  if (candNorm !== rootNorm && !candNorm.startsWith(prefixNorm)) {
+  const fold = usesWindowsPathApi(root) || usesWindowsPathApi(candidate);
+  const candCmp = fold ? candidate.toLowerCase() : candidate;
+  const rootCmp = fold ? root.toLowerCase() : root;
+  const prefixCmp = fold ? rootPrefix.toLowerCase() : rootPrefix;
+  if (candCmp !== rootCmp && !candCmp.startsWith(prefixCmp)) {
     return null;
   }
   return candidate;
