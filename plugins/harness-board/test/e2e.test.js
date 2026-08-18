@@ -197,6 +197,78 @@ test("e2e happy path: upsert → … → done + HTML markers + persistence", asy
   });
 });
 
+test("e2e attention: awaitingHuman dots persist on GET; Active-only has no marker", async () => {
+  await withServer(async ({ url }) => {
+    const upsert = await postAction(url, {
+      action: ACTIONS.INITIATIVE_UPSERT,
+      planPath: "plans/attention.md",
+      title: "Needs a human",
+      status: "planning",
+      awaitingHuman: true,
+    });
+    assert.equal(upsert.status, 200);
+    const initiativeId = upsert.json.initiative.id;
+    assert.equal(upsert.json.initiative.awaitingHuman, true);
+
+    const htmlRes = await fetch(`${url}/`);
+    assert.equal(htmlRes.status, 200);
+    const html = await htmlRes.text();
+    assert.match(
+      html,
+      new RegExp(
+        `data-initiative-id="${initiativeId}"[^>]*data-attention="true"`,
+      ),
+    );
+    assert.match(html, /class="nav-item[^"]*has-attention/);
+    assert.match(html, /nav-item[^>]*data-attention="true"/);
+    assert.match(html, /class="nav-dot"/);
+    assert.match(html, /nav-pill/);
+
+    const htmlAgain = await (await fetch(`${url}/`)).text();
+    assert.match(
+      htmlAgain,
+      new RegExp(
+        `data-initiative-id="${initiativeId}"[^>]*data-attention="true"`,
+      ),
+    );
+    assert.match(htmlAgain, /nav-item[^>]*data-attention="true"/);
+
+    const boardsRes = await fetch(`${url}/api/boards`);
+    assert.equal(boardsRes.status, 200);
+    const boardsJson = await boardsRes.json();
+    assert.ok(boardsJson.boards.length >= 1);
+    const board = boardsJson.boards[0];
+    assert.equal(board.hasAttention, true);
+    assert.equal(board.attention, true);
+    assert.equal(board.active, true);
+    assert.equal(board.hasActiveWork, true);
+
+    const clear = await postAction(url, {
+      action: ACTIONS.INITIATIVE_UPSERT,
+      id: initiativeId,
+      planPath: "plans/attention.md",
+      title: "Needs a human",
+      status: "planning",
+      awaitingHuman: false,
+    });
+    assert.equal(clear.status, 200);
+    assert.equal(clear.json.initiative.awaitingHuman, false);
+
+    const activeOnly = await (await fetch(`${url}/`)).text();
+    assert.match(activeOnly, /nav-pill/);
+    assert.match(activeOnly, />active</);
+    assert.doesNotMatch(activeOnly, /data-attention/);
+    assert.doesNotMatch(activeOnly, /has-attention/);
+    assert.doesNotMatch(activeOnly, /class="nav-dot"/);
+
+    const boardsClear = await (await fetch(`${url}/api/boards`)).json();
+    const boardClear = boardsClear.boards[0];
+    assert.equal(boardClear.hasAttention, false);
+    assert.equal(boardClear.attention, false);
+    assert.equal(boardClear.active, true);
+  });
+});
+
 test("e2e illegal: move_card rejected with allowedActions", async () => {
   await withServer(async ({ url }) => {
     const upsert = await postAction(url, {

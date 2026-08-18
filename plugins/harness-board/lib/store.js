@@ -14,6 +14,7 @@ import { expandHomePath } from "./workspace.js";
  * @property {string} title
  * @property {string} blurb
  * @property {InitiativeStatus} status
+ * @property {boolean} [awaitingHuman] Human reply needed; missing treated as false
  * @property {string} updatedAt ISO-8601
  */
 
@@ -181,6 +182,9 @@ export async function upsertInitiative(workspacePath, input, options = {}) {
       }
       initiative.status = input.status;
     }
+    if (typeof input.awaitingHuman === "boolean") {
+      initiative.awaitingHuman = input.awaitingHuman;
+    }
     initiative.updatedAt = now;
   } else {
     const status = input.status ?? "planning";
@@ -193,6 +197,7 @@ export async function upsertInitiative(workspacePath, input, options = {}) {
       title: input.title,
       blurb: input.blurb ?? "",
       status,
+      awaitingHuman: input.awaitingHuman === true,
       updatedAt: now,
     };
     state.initiatives.push(initiative);

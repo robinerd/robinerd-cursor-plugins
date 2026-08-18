@@ -16,6 +16,7 @@ const ACTIVE_INITIATIVE_STATUSES = new Set([
  * @property {number} mtimeMs
  * @property {string} mtimeIso
  * @property {boolean} hasActiveWork true when ≥1 initiative is planning/building/integrating
+ * @property {boolean} hasAttention computed: any initiative needs human attention
  */
 
 /**
@@ -35,6 +36,50 @@ export function boardHasActiveWork(parsed) {
       ACTIVE_INITIATIVE_STATUSES.has(
         /** @type {{ status: string }} */ (i).status,
       ),
+  );
+}
+
+/**
+ * @param {{ status?: unknown, awaitingHuman?: unknown, id?: unknown }} initiative
+ * @param {unknown} slices
+ * @returns {boolean}
+ */
+export function initiativeNeedsAttention(initiative, slices) {
+  if (!initiative || typeof initiative !== "object") return false;
+  const status = initiative.status;
+  if (status === "parked" || status === "done") return false;
+  if (initiative.awaitingHuman === true) return true;
+  const initiativeId = initiative.id;
+  if (typeof initiativeId !== "string" || !initiativeId) return false;
+  if (!Array.isArray(slices)) return false;
+  return slices.some(
+    (s) =>
+      s &&
+      typeof s === "object" &&
+      /** @type {{ initiativeId?: unknown }} */ (s).initiativeId ===
+        initiativeId &&
+      /** @type {{ column?: unknown }} */ (s).column === "blocked",
+  );
+}
+
+/**
+ * @param {unknown} parsed
+ * @returns {boolean}
+ */
+export function boardHasAttention(parsed) {
+  if (!parsed || typeof parsed !== "object") return false;
+  const obj = /** @type {{ initiatives?: unknown, slices?: unknown }} */ (
+    parsed
+  );
+  if (!Array.isArray(obj.initiatives)) return false;
+  const slices = Array.isArray(obj.slices) ? obj.slices : [];
+  return obj.initiatives.some((i) =>
+    initiativeNeedsAttention(
+      /** @type {{ status?: unknown, awaitingHuman?: unknown, id?: unknown }} */ (
+        i
+      ),
+      slices,
+    ),
   );
 }
 
@@ -68,6 +113,7 @@ export async function listBoardSummaries(dataRoot) {
       const st = await stat(stateFile);
       let workspacePath = ent.name;
       let hasActiveWork = false;
+      let hasAttention = false;
       try {
         const raw = await readFile(stateFile, "utf8");
         const parsed = JSON.parse(raw);
@@ -80,6 +126,7 @@ export async function listBoardSummaries(dataRoot) {
           workspacePath = parsed.workspacePath.trim();
         }
         hasActiveWork = boardHasActiveWork(parsed);
+        hasAttention = boardHasAttention(parsed);
       } catch {
         // keep hash as label; no active work if unreadable JSON
       }
@@ -89,6 +136,7 @@ export async function listBoardSummaries(dataRoot) {
         mtimeMs: st.mtimeMs,
         mtimeIso: new Date(st.mtimeMs).toISOString(),
         hasActiveWork,
+        hasAttention,
       });
     } catch {
       // missing/unreadable state.json — skip
