@@ -343,6 +343,15 @@ function initiativeDisplayRank(status) {
 }
 
 /**
+ * Done initiatives start collapsed; all other statuses start expanded.
+ * @param {string} [status]
+ * @returns {boolean}
+ */
+export function initiativeCollapsedByDefault(status) {
+  return status === "done";
+}
+
+/**
  * Swimlane order: not done first, done last; newest `updatedAt` first within a group.
  * @param {import("./store.js").Initiative[]} initiatives
  * @returns {import("./store.js").Initiative[]}
@@ -409,19 +418,30 @@ function renderSwimlanes(state) {
       const attentionDot = needsAttention
         ? `<span class="nav-dot" aria-hidden="true"></span>`
         : "";
+      const collapsed = initiativeCollapsedByDefault(initiative.status);
+      const collapsedClass = collapsed ? " is-collapsed" : "";
+      const collapsedAttr = collapsed ? ` data-collapsed="true"` : "";
+      const ariaExpanded = collapsed ? "false" : "true";
+      const toggleLabel = collapsed ? "Expand initiative" : "Collapse initiative";
+      const detailsId = `initiative-details-${escapeHtml(initiative.id)}`;
 
       return `
-            <section class="initiative" data-initiative-id="${escapeHtml(initiative.id)}" data-status="${escapeHtml(initiative.status)}"${attentionAttr}>
+            <section class="initiative${collapsedClass}" data-initiative-id="${escapeHtml(initiative.id)}" data-status="${escapeHtml(initiative.status)}"${attentionAttr}${collapsedAttr}>
               <header class="initiative-header">
                 <div class="initiative-title-row">
+                  <button type="button" class="initiative-toggle" aria-expanded="${ariaExpanded}" aria-controls="${detailsId}" aria-label="${escapeHtml(toggleLabel)}">
+                    <span class="initiative-toggle-icon" aria-hidden="true"></span>
+                  </button>
                   <h2 class="initiative-title"${titleAria}>${escapeHtml(initiative.title)}</h2>
                   ${attentionDot}
                   <span class="badge status-${escapeHtml(initiative.status)}" data-status-badge>${escapeHtml(statusLabel)}</span>
                 </div>
                 <p class="initiative-blurb" data-blurb>${escapeHtml(initiative.blurb || "")}</p>
-                <a class="plan-link" data-plan-link href="${escapeHtml(href)}"${titleAttr}>${escapeHtml(planPath)}</a>
               </header>
-              <div class="columns" role="list">${columns}</div>
+              <div class="initiative-details" id="${detailsId}">
+                <a class="plan-link" data-plan-link href="${escapeHtml(href)}"${titleAttr}>${escapeHtml(planPath)}</a>
+                <div class="columns" role="list">${columns}</div>
+              </div>
             </section>`;
     })
     .join("");
@@ -616,11 +636,49 @@ export function renderBoardHtml(state, shell = {}) {
       padding: 1rem 1rem 1.25rem;
       margin-bottom: 1.25rem;
     }
+    .initiative.is-collapsed {
+      padding-bottom: 0.75rem;
+    }
     .initiative-title-row {
       display: flex;
       flex-wrap: wrap;
       align-items: center;
       gap: 0.5rem 0.75rem;
+    }
+    .initiative-toggle {
+      flex-shrink: 0;
+      width: 1.5rem;
+      height: 1.5rem;
+      margin: 0;
+      padding: 0;
+      border: 0;
+      border-radius: 4px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .initiative-toggle:hover {
+      background: var(--bg);
+      color: var(--ink);
+    }
+    .initiative-toggle-icon {
+      display: block;
+      width: 0;
+      height: 0;
+      border-top: 5px solid transparent;
+      border-bottom: 5px solid transparent;
+      border-left: 7px solid currentColor;
+      transform-origin: 35% 50%;
+      transition: transform 0.12s ease;
+    }
+    .initiative:not(.is-collapsed) .initiative-toggle-icon {
+      transform: rotate(90deg);
+    }
+    .initiative.is-collapsed .initiative-details {
+      display: none;
     }
     .initiative-title {
       margin: 0;
@@ -731,6 +789,7 @@ export function renderBoardHtml(state, shell = {}) {
   <script>
 (function () {
   var POLL_MS = 2500;
+  var STORAGE_KEY = "harness-board:initiative-collapsed";
   var boardEl = document.getElementById("board");
   if (!boardEl) return;
   var selectedPath = boardEl.getAttribute("data-workspace") || "";
@@ -740,6 +799,60 @@ export function renderBoardHtml(state, shell = {}) {
     var bs = String.fromCharCode(92);
     return String(p || "").split(bs).join("/").replace(new RegExp("/+$"), "").toLowerCase();
   }
+
+  function readPrefs() {
+    try {
+      var parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function writePref(id, collapsed) {
+    if (!id) return;
+    var prefs = readPrefs();
+    prefs[id] = collapsed;
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs));
+    } catch (e) { /* quota / private mode */ }
+  }
+
+  function setCollapsed(el, collapsed) {
+    el.classList.toggle("is-collapsed", collapsed);
+    if (collapsed) el.setAttribute("data-collapsed", "true");
+    else el.removeAttribute("data-collapsed");
+    var btn = el.querySelector(".initiative-toggle");
+    if (btn) {
+      btn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      btn.setAttribute("aria-label", collapsed ? "Expand initiative" : "Collapse initiative");
+    }
+  }
+
+  function applyPrefs() {
+    var prefs = readPrefs();
+    var nodes = boardEl.querySelectorAll(".initiative");
+    for (var i = 0; i < nodes.length; i++) {
+      var el = nodes[i];
+      var id = el.getAttribute("data-initiative-id") || "";
+      if (!id || !Object.prototype.hasOwnProperty.call(prefs, id)) continue;
+      setCollapsed(el, Boolean(prefs[id]));
+    }
+  }
+
+  boardEl.addEventListener("click", function (ev) {
+    var target = ev.target;
+    if (!target || !target.closest) return;
+    var btn = target.closest(".initiative-toggle");
+    if (!btn || !boardEl.contains(btn)) return;
+    var el = btn.closest(".initiative");
+    if (!el) return;
+    var next = !el.classList.contains("is-collapsed");
+    setCollapsed(el, next);
+    writePref(el.getAttribute("data-initiative-id") || "", next);
+  });
+
+  applyPrefs();
 
   function poll() {
     var url = "/api/boards";

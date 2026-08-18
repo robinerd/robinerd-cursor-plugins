@@ -269,6 +269,50 @@ test("e2e attention: awaitingHuman dots persist on GET; Active-only has no marke
   });
 });
 
+test("e2e collapse: done starts collapsed; planning expanded", async () => {
+  await withServer(async ({ url }) => {
+    const doneUpsert = await postAction(url, {
+      action: ACTIONS.INITIATIVE_UPSERT,
+      planPath: "plans/done.md",
+      title: "Finished work",
+      blurb: "Should start collapsed",
+      status: "done",
+    });
+    assert.equal(doneUpsert.status, 200);
+    const doneId = doneUpsert.json.initiative.id;
+
+    const planUpsert = await postAction(url, {
+      action: ACTIONS.INITIATIVE_UPSERT,
+      planPath: "plans/open.md",
+      title: "Open work",
+      blurb: "Should start expanded",
+      status: "planning",
+    });
+    assert.equal(planUpsert.status, 200);
+    const planId = planUpsert.json.initiative.id;
+
+    const html = await (await fetch(`${url}/`)).text();
+    assert.match(
+      html,
+      new RegExp(
+        `data-initiative-id="${doneId}"[^>]*data-collapsed="true"`,
+      ),
+    );
+    assert.match(html, /class="initiative is-collapsed"/);
+    assert.match(html, /class="initiative-toggle"/);
+    assert.match(html, /initiative-details-/);
+    assert.match(html, /Should start collapsed/);
+    assert.match(html, /data-plan-link/);
+    assert.match(html, /class="columns"/);
+
+    assert.match(html, new RegExp(`data-initiative-id="${planId}"`));
+    assert.doesNotMatch(
+      html,
+      new RegExp(`data-initiative-id="${planId}"[^>]*data-collapsed`),
+    );
+  });
+});
+
 test("e2e illegal: move_card rejected with allowedActions", async () => {
   await withServer(async ({ url }) => {
     const upsert = await postAction(url, {
