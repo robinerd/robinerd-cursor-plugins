@@ -195,6 +195,7 @@ export function createHarnessBoardMcpServer(env = {}) {
       status: z
         .enum(["planning", "building", "integrating", "done", "parked"])
         .optional(),
+      awaitingHuman: z.boolean().optional(),
     },
     run("initiative_upsert"),
   );

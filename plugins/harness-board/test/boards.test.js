@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { test } from "node:test";
 import {
   boardHasActiveWork,
+  boardHasAttention,
+  initiativeNeedsAttention,
   listBoardSummaries,
   hashForWorkspace,
   resolveSelectedWorkspace,
@@ -15,9 +17,16 @@ import { rememberActiveWorkspace } from "../lib/workspace.js";
  * @param {string} dataRoot
  * @param {string} workspacePath
  * @param {number} mtimeMs
- * @param {{ status: string }[]} [initiatives]
+ * @param {{ id?: string, status: string, awaitingHuman?: boolean }[]} [initiatives]
+ * @param {{ id?: string, initiativeId: string, column: string }[]} [slices]
  */
-async function writeBoard(dataRoot, workspacePath, mtimeMs, initiatives = []) {
+async function writeBoard(
+  dataRoot,
+  workspacePath,
+  mtimeMs,
+  initiatives = [],
+  slices = [],
+) {
   const hash = hashForWorkspace(workspacePath);
   const dir = join(dataRoot, hash);
   await mkdir(dir, { recursive: true });
@@ -25,14 +34,24 @@ async function writeBoard(dataRoot, workspacePath, mtimeMs, initiatives = []) {
   const payload = {
     workspacePath,
     initiatives: initiatives.map((i, idx) => ({
-      id: `i${idx}`,
+      id: i.id ?? `i${idx}`,
       planPath: "plans/x.md",
       title: `Init ${idx}`,
       blurb: "",
       status: i.status,
+      ...(typeof i.awaitingHuman === "boolean"
+        ? { awaitingHuman: i.awaitingHuman }
+        : {}),
       updatedAt: new Date(mtimeMs).toISOString(),
     })),
-    slices: [],
+    slices: slices.map((s, idx) => ({
+      id: s.id ?? `s${idx}`,
+      initiativeId: s.initiativeId,
+      title: `Slice ${idx}`,
+      column: s.column,
+      evidence: [],
+      history: [],
+    })),
     updatedAt: new Date(mtimeMs).toISOString(),
   };
   await writeFile(stateFile, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
@@ -64,6 +83,7 @@ test("listBoardSummaries sorts by state.json mtime newest first", async () => {
     assert.equal(boards[0].hash, hashForWorkspace(newer));
     assert.match(boards[0].mtimeIso, /^2025-/);
     assert.equal(boards[0].hasActiveWork, false);
+    assert.equal(boards[0].hasAttention, false);
   } finally {
     await rm(dataRoot, { recursive: true, force: true });
   }
@@ -124,6 +144,112 @@ test("listBoardSummaries hasActiveWork from initiative statuses; multiple boards
     assert.equal(byPath[a], true);
     assert.equal(byPath[b], true);
     assert.equal(byPath[c], false);
+  } finally {
+    await rm(dataRoot, { recursive: true, force: true });
+  }
+});
+
+test("initiativeNeedsAttention: parked/done never; flag and blocked slices", () => {
+  const slices = [{ initiativeId: "a", column: "blocked" }];
+  assert.equal(
+    initiativeNeedsAttention({ id: "a", status: "parked", awaitingHuman: true }, slices),
+    false,
+  );
+  assert.equal(
+    initiativeNeedsAttention({ id: "a", status: "done", awaitingHuman: true }, slices),
+    false,
+  );
+  assert.equal(
+    initiativeNeedsAttention({ id: "a", status: "integrating" }, []),
+    false,
+  );
+  assert.equal(
+    initiativeNeedsAttention(
+      { id: "a", status: "planning", awaitingHuman: true },
+      [],
+    ),
+    true,
+  );
+  assert.equal(
+    initiativeNeedsAttention(
+      { id: "a", status: "building", awaitingHuman: true },
+      [],
+    ),
+    true,
+  );
+  assert.equal(
+    initiativeNeedsAttention(
+      { id: "a", status: "integrating", awaitingHuman: true },
+      [],
+    ),
+    true,
+  );
+  assert.equal(
+    initiativeNeedsAttention(
+      { id: "a", status: "building", awaitingHuman: false },
+      slices,
+    ),
+    true,
+  );
+});
+
+test("boardHasAttention ORs initiatives using parsed slices", () => {
+  assert.equal(
+    boardHasAttention({
+      initiatives: [
+        { id: "quiet", status: "building" },
+        { id: "loud", status: "planning", awaitingHuman: true },
+      ],
+      slices: [],
+    }),
+    true,
+  );
+  assert.equal(
+    boardHasAttention({
+      initiatives: [{ id: "quiet", status: "integrating" }],
+      slices: [{ initiativeId: "other", column: "blocked" }],
+    }),
+    false,
+  );
+  assert.equal(
+    boardHasAttention({
+      initiatives: [{ id: "q", status: "building" }],
+      slices: [{ initiativeId: "q", column: "blocked" }],
+    }),
+    true,
+  );
+  assert.equal(boardHasAttention({}), false);
+  assert.equal(boardHasAttention(null), false);
+});
+
+test("listBoardSummaries hasAttention from derive, not stored field", async () => {
+  const dataRoot = await mkdtemp(join(tmpdir(), "harness-board-attn-"));
+  try {
+    const quiet = "/tmp/ws-quiet";
+    const flagged = "/tmp/ws-flagged";
+    const blocked = "/tmp/ws-blocked";
+    await writeBoard(dataRoot, quiet, Date.UTC(2025, 0, 3), [
+      { status: "integrating" },
+    ]);
+    await writeBoard(dataRoot, flagged, Date.UTC(2025, 0, 2), [
+      { id: "f", status: "planning", awaitingHuman: true },
+    ]);
+    await writeBoard(
+      dataRoot,
+      blocked,
+      Date.UTC(2025, 0, 1),
+      [{ id: "b", status: "building", awaitingHuman: false }],
+      [{ initiativeId: "b", column: "blocked" }],
+    );
+
+    const boards = await listBoardSummaries(dataRoot);
+    const byPath = Object.fromEntries(
+      boards.map((x) => [x.workspacePath, x.hasAttention]),
+    );
+    assert.equal(byPath[quiet], false);
+    assert.equal(byPath[flagged], true);
+    assert.equal(byPath[blocked], true);
+    assert.equal("hasAttention" in boards[0], true);
   } finally {
     await rm(dataRoot, { recursive: true, force: true });
   }

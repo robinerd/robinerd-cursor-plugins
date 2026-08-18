@@ -2,7 +2,7 @@ import http from "node:http";
 import { readFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve as pathResolve, sep } from "node:path";
 import { getState } from "./store.js";
-import { resolveSelectedWorkspace } from "./boards.js";
+import { initiativeNeedsAttention, resolveSelectedWorkspace } from "./boards.js";
 import {
   ACTIONS,
   SLICE_COLUMNS,
@@ -84,6 +84,10 @@ export async function dispatchAction(workspacePath, body, options = {}) {
           status:
             typeof body.status === "string"
               ? /** @type {import("./store.js").InitiativeStatus} */ (body.status)
+              : undefined,
+          awaitingHuman:
+            typeof body.awaitingHuman === "boolean"
+              ? body.awaitingHuman
               : undefined,
         },
         options,
@@ -331,12 +335,36 @@ function boardLabel(workspacePath) {
 }
 
 /**
+ * Display rank: unfinished first, done last.
+ * @param {string} [status]
+ */
+function initiativeDisplayRank(status) {
+  return status === "done" ? 1 : 0;
+}
+
+/**
+ * Swimlane order: not done first, done last; newest `updatedAt` first within a group.
+ * @param {import("./store.js").Initiative[]} initiatives
+ * @returns {import("./store.js").Initiative[]}
+ */
+export function sortInitiativesForDisplay(initiatives) {
+  return [...initiatives].sort((a, b) => {
+    const rank = initiativeDisplayRank(a.status) - initiativeDisplayRank(b.status);
+    if (rank !== 0) return rank;
+    const aTime = a.updatedAt || "";
+    const bTime = b.updatedAt || "";
+    if (aTime !== bTime) return aTime < bTime ? 1 : -1;
+    return (a.id || "").localeCompare(b.id || "");
+  });
+}
+
+/**
  * Board swimlanes HTML (markers used by e2e).
  * @param {BoardState} state
  * @returns {string}
  */
 function renderSwimlanes(state) {
-  const initiatives = state.initiatives ?? [];
+  const initiatives = sortInitiativesForDisplay(state.initiatives ?? []);
   const slices = state.slices ?? [];
   const workspacePath = state.workspacePath || "";
 
@@ -373,12 +401,21 @@ function renderSwimlanes(state) {
         workspacePath && planPath ? planViewHref(workspacePath, planPath) : "#";
       const fileHref = abs ? toFileUrl(abs) : "";
       const titleAttr = fileHref ? ` title="${escapeHtml(fileHref)}"` : "";
+      const needsAttention = initiativeNeedsAttention(initiative, slices);
+      const attentionAttr = needsAttention ? ` data-attention="true"` : "";
+      const titleAria = needsAttention
+        ? ` aria-label="${escapeHtml(`${initiative.title} — Needs your input`)}"`
+        : "";
+      const attentionDot = needsAttention
+        ? `<span class="nav-dot" aria-hidden="true"></span>`
+        : "";
 
       return `
-            <section class="initiative" data-initiative-id="${escapeHtml(initiative.id)}" data-status="${escapeHtml(initiative.status)}">
+            <section class="initiative" data-initiative-id="${escapeHtml(initiative.id)}" data-status="${escapeHtml(initiative.status)}"${attentionAttr}>
               <header class="initiative-header">
                 <div class="initiative-title-row">
-                  <h2 class="initiative-title">${escapeHtml(initiative.title)}</h2>
+                  <h2 class="initiative-title"${titleAria}>${escapeHtml(initiative.title)}</h2>
+                  ${attentionDot}
                   <span class="badge status-${escapeHtml(initiative.status)}" data-status-badge>${escapeHtml(statusLabel)}</span>
                 </div>
                 <p class="initiative-blurb" data-blurb>${escapeHtml(initiative.blurb || "")}</p>
@@ -392,7 +429,7 @@ function renderSwimlanes(state) {
 
 /**
  * @typedef {object} RenderShellOptions
- * @property {Array<BoardSummary & { selected?: boolean, active?: boolean }>} [boards]
+ * @property {Array<BoardSummary & { selected?: boolean, active?: boolean, attention?: boolean }>} [boards]
  * @property {string | null} [selectedWorkspace]
  * @property {number} [selectedMtimeMs]
  */
@@ -419,17 +456,24 @@ export function renderBoardHtml(state, shell = {}) {
           .map((b) => {
             const selected = Boolean(b.selected);
             const active = Boolean(b.active);
+            const attention = Boolean(b.attention ?? b.hasAttention);
             const href = `/?workspace=${encodeURIComponent(b.workspacePath)}`;
             const classes = [
               "nav-item",
               selected ? "is-selected" : "",
               active ? "is-active" : "",
+              attention ? "has-attention" : "",
             ]
               .filter(Boolean)
               .join(" ");
+            const attentionAttr = attention ? ` data-attention="true"` : "";
+            const attentionDot = attention
+              ? `<span class="nav-dot" aria-hidden="true"></span>`
+              : "";
             return `
-            <a class="${classes}" href="${escapeHtml(href)}" data-board-hash="${escapeHtml(b.hash)}" data-workspace="${escapeHtml(b.workspacePath)}" title="${escapeHtml(b.workspacePath)}">
+            <a class="${classes}" href="${escapeHtml(href)}" data-board-hash="${escapeHtml(b.hash)}" data-workspace="${escapeHtml(b.workspacePath)}" title="${escapeHtml(b.workspacePath)}"${attentionAttr}>
               <span class="nav-label">${escapeHtml(boardLabel(b.workspacePath))}</span>
+              ${attentionDot}
               ${active ? `<span class="nav-pill">active</span>` : ""}
             </a>`;
           })
@@ -523,6 +567,18 @@ export function renderBoardHtml(state, shell = {}) {
       letter-spacing: 0.04em;
       color: var(--accent);
       font-weight: 700;
+    }
+    .nav-dot {
+      flex-shrink: 0;
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #dc2626;
+    }
+    .nav-item.is-selected .nav-dot,
+    .initiative .nav-dot {
+      display: inline-block;
     }
     .nav-empty {
       margin: 0;
@@ -765,6 +821,7 @@ function annotateBoards(boards, selectedWorkspace) {
     ...b,
     selected: normPath(b.workspacePath) === sel,
     active: Boolean(b.hasActiveWork),
+    attention: Boolean(b.hasAttention),
   }));
 }
 

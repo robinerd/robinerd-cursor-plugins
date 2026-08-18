@@ -9,8 +9,8 @@
   "scripts": {
     "board": "node bin/board.js",
     "mcp": "node bin/mcp.js",
-    "test": "node --test test/store.test.js test/transitions.test.js test/boards.test.js test/e2e.test.js test/mcp.test.js test/plan.test.js",
-    "test:unit": "node --test test/store.test.js test/transitions.test.js test/boards.test.js test/mcp.test.js test/plan.test.js",
+    "test": "node --test test/store.test.js test/transitions.test.js test/boards.test.js test/e2e.test.js test/mcp.test.js test/plan.test.js test/server.test.js",
+    "test:unit": "node --test test/store.test.js test/transitions.test.js test/boards.test.js test/mcp.test.js test/plan.test.js test/server.test.js",
     "test:e2e": "node --test test/e2e.test.js"
   },
   "bin": {

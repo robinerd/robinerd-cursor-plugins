@@ -26,6 +26,16 @@ Stay in **Agent mode**. Do **not** switch to Plan mode to ask questions.
 4. Do **not** also add "Other" / "Something else" — only `Custom: …`.
 5. If `AskQuestion` is unavailable, ask the same options as a short prose list ending with `Custom: …`, then wait.
 
+## Board attention (`awaitingHuman`)
+
+When harness-board MCP is available and the active initiative is known (`planPath` / id):
+
+- **Before** `AskQuestion` (or the prose fallback wait): `initiative_upsert` with `awaitingHuman: true`. Keep the existing `title` and `planPath`; do **not** wipe `status`. Soft-fail if MCP is unavailable.
+- **After** the human answers: set `awaitingHuman: false` **only if they are no longer on the hook**. If another question follows immediately, leave or set `true`.
+- Always pass `workspace` (absolute path of the agent’s project root). To operate on another board, pass that workspace’s absolute path instead.
+
+Blocked slices already show the attention dot without this flag.
+
 ## Slice gate (required before coding)
 
 Before starting implementation (or before each remaining slice unless mass-approved), ask:
@@ -47,4 +57,4 @@ When drafting or finishing §§1–6, if a decision would change the plan output
 
 ## After the answer
 
-Apply the choice to the living plan, then continue the stage. Do not invent a default when the human was asked.
+Apply the choice to the living plan, then continue the stage. Do **not** invent a default when the human was asked. Then clear or keep `awaitingHuman` as in **Board attention** above.

@@ -125,6 +125,64 @@ test("save/load round-trip + upsertInitiative + addSlice", async () => {
     assert.equal(again.state.initiatives.length, 1);
     assert.equal(again.initiative.status, "building");
     assert.equal(again.initiative.title, "Demo updated");
+    assert.equal(again.initiative.awaitingHuman, false);
+  } finally {
+    await rm(dataRoot, { recursive: true, force: true });
+  }
+});
+
+test("upsertInitiative persist and preserve awaitingHuman", async () => {
+  const dataRoot = await mkdtempSafe();
+  try {
+    const ws = "/tmp/workspace/awaiting-human";
+    const createdFalse = await upsertInitiative(
+      ws,
+      {
+        planPath: "plans/ah.md",
+        title: "AH",
+      },
+      { dataRoot },
+    );
+    assert.equal(createdFalse.initiative.awaitingHuman, false);
+
+    const createdTrue = await upsertInitiative(
+      ws,
+      {
+        planPath: "plans/ah-true.md",
+        title: "AH true",
+        awaitingHuman: true,
+      },
+      { dataRoot },
+    );
+    assert.equal(createdTrue.initiative.awaitingHuman, true);
+
+    const omitted = await upsertInitiative(
+      ws,
+      {
+        id: createdTrue.initiative.id,
+        planPath: "plans/ah-true.md",
+        title: "AH true renamed",
+      },
+      { dataRoot },
+    );
+    assert.equal(omitted.initiative.awaitingHuman, true);
+    assert.equal(omitted.initiative.title, "AH true renamed");
+
+    const cleared = await upsertInitiative(
+      ws,
+      {
+        id: createdTrue.initiative.id,
+        planPath: "plans/ah-true.md",
+        title: "AH true renamed",
+        awaitingHuman: false,
+      },
+      { dataRoot },
+    );
+    assert.equal(cleared.initiative.awaitingHuman, false);
+
+    const reloaded = await getState(ws, { dataRoot });
+    const row = reloaded.initiatives.find((i) => i.id === createdTrue.initiative.id);
+    assert.equal(row?.awaitingHuman, false);
   } finally {
     await rm(dataRoot, { recursive: true, force: true });
   }
