@@ -13,6 +13,9 @@ test("resolveSafePlanPath allows under workspace, rejects traversal", () => {
 
   assert.equal(resolveSafePlanPath(root, "../outside.md"), null);
   assert.equal(resolveSafePlanPath(root, "D:\\other\\x.md"), null);
+  assert.equal(resolveSafePlanPath(root, "D:/other/x.md"), null);
+  assert.equal(resolveSafePlanPath("  D:\\proj\\  ", "plans\\\\foo.md"), ok);
+  assert.equal(resolveSafePlanPath("d:/proj", "plans/foo.md")?.toLowerCase(), ok.toLowerCase());
 });
 
 test("toFileUrl formats windows paths", () => {

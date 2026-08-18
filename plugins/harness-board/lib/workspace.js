@@ -1,7 +1,14 @@
-import { resolve, join } from "node:path";
+import path from "node:path";
 import { homedir } from "node:os";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { defaultDataRoot } from "./store.js";
+
+const { join, posix, win32 } = path;
+
+const WIN_DRIVE = /^[A-Za-z]:[\\/]/;
+const WIN_UNC = /^\\\\/;
+const WIN_LONG_UNC = /^\\\\\?\\UNC\\/i;
+const WIN_LONG = /^\\\\\?\\/;
 
 /**
  * True when Cursor left a template unexpanded (e.g. literal `${workspaceFolder}`).
@@ -9,6 +16,102 @@ import { defaultDataRoot } from "./store.js";
  */
 export function isUnexpandedTemplate(value) {
   return /\$\{[^}]+\}/.test(value);
+}
+
+/**
+ * String looks like a Windows path (drive, UNC, `\\?\`) even on POSIX hosts.
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+export function looksWindowsPath(value) {
+  if (typeof value !== "string") return false;
+  const p = value.trim();
+  return WIN_DRIVE.test(p) || WIN_UNC.test(p) || WIN_LONG.test(p);
+}
+
+/**
+ * Use win32 path semantics: native Windows, or a Windows-shaped path on POSIX.
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+export function usesWindowsPathApi(value) {
+  return process.platform === "win32" || looksWindowsPath(value);
+}
+
+/**
+ * @param {unknown} value
+ * @returns {path.PlatformPath}
+ */
+export function pathApiFor(value) {
+  return usesWindowsPathApi(value) ? win32 : posix;
+}
+
+/**
+ * @param {string} value
+ * @returns {string}
+ */
+function stripWinLongPathPrefix(value) {
+  if (WIN_LONG_UNC.test(value)) return `\\\\${value.slice(8)}`;
+  if (WIN_LONG.test(value)) return value.slice(4);
+  return value;
+}
+
+/**
+ * @param {string} value
+ * @returns {string}
+ */
+function uppercaseDriveLetter(value) {
+  return value.replace(/^([a-zA-Z]):/, (_, d) => `${d.toUpperCase()}:`);
+}
+
+/**
+ * @param {string} value
+ * @param {boolean} win
+ * @returns {string}
+ */
+function stripTrailingSeparators(value, win) {
+  if (win) {
+    if (/^[A-Z]:\\$/i.test(value)) return value;
+    if (/^\\\\[^\\]+\\[^\\]+$/.test(value)) return value;
+    return value.replace(/[\\/]+$/, "");
+  }
+  if (value === "/") return value;
+  return value.replace(/\/+$/, "");
+}
+
+/**
+ * Stable workspace identity for store keys and board matching.
+ * Trims; expands `~`; resolves `.`/`..`; unifies separators; strips trailing
+ * `/` or `\`; uppercases a Windows drive letter. Rest of the path keeps case
+ * for display; {@link workspaceIdentityKey} case-folds Windows paths for hashing.
+ * @param {string} workspacePath
+ * @returns {string}
+ */
+export function canonicalizeWorkspacePath(workspacePath) {
+  const trimmed =
+    typeof workspacePath === "string" ? workspacePath.trim() : "";
+  const expanded = expandHomePath(trimmed);
+  const win = usesWindowsPathApi(trimmed) || usesWindowsPathApi(expanded);
+  if (win) {
+    const stripped = stripWinLongPathPrefix(expanded);
+    const resolved = uppercaseDriveLetter(win32.resolve(stripped));
+    return stripTrailingSeparators(resolved, true);
+  }
+  const resolved = posix.resolve(expanded);
+  return stripTrailingSeparators(resolved, false);
+}
+
+/**
+ * Hash/compare key: canonical path, case-insensitive for Windows-style paths.
+ * @param {string} workspacePath
+ * @returns {string}
+ */
+export function workspaceIdentityKey(workspacePath) {
+  const canonical = canonicalizeWorkspacePath(workspacePath);
+  if (usesWindowsPathApi(workspacePath) || usesWindowsPathApi(canonical)) {
+    return canonical.toLowerCase();
+  }
+  return canonical;
 }
 
 /**
@@ -52,8 +155,8 @@ function activeWorkspaceFile(dataRoot) {
  */
 export function rememberActiveWorkspace(workspacePath, dataRoot) {
   if (!workspacePath || isUnexpandedTemplate(workspacePath)) return;
-  const resolved = resolve(expandHomePath(workspacePath));
-  if (resolved === resolve(homedir())) return;
+  const resolved = canonicalizeWorkspacePath(workspacePath);
+  if (resolved === canonicalizeWorkspacePath(homedir())) return;
   try {
     const root = defaultDataRoot(dataRoot);
     mkdirSync(root, { recursive: true });
@@ -71,7 +174,7 @@ export function readActiveWorkspace(dataRoot) {
   try {
     const raw = readFileSync(activeWorkspaceFile(dataRoot), "utf8").trim();
     if (!raw || isUnexpandedTemplate(raw)) return undefined;
-    return resolve(expandHomePath(raw));
+    return canonicalizeWorkspacePath(raw);
   } catch {
     return undefined;
   }
@@ -95,7 +198,7 @@ export function resolveExplicitWorkspace(candidate) {
       "workspace must be an absolute path (unexpanded template rejected)",
     );
   }
-  return resolve(expandHomePath(trimmed));
+  return canonicalizeWorkspacePath(trimmed);
 }
 
 /**
@@ -110,13 +213,13 @@ export function sanitizeWorkspacePath(
   fallback = process.cwd(),
   dataRoot,
 ) {
-  const home = resolve(homedir());
+  const home = canonicalizeWorkspacePath(homedir());
   const remembered = readActiveWorkspace(dataRoot);
 
   if (candidate && typeof candidate === "string") {
     const trimmed = candidate.trim();
     if (trimmed && !isUnexpandedTemplate(trimmed)) {
-      const resolved = resolve(expandHomePath(trimmed));
+      const resolved = canonicalizeWorkspacePath(trimmed);
       if (resolved !== home) {
         rememberActiveWorkspace(resolved, dataRoot);
         return resolved;
@@ -126,7 +229,7 @@ export function sanitizeWorkspacePath(
 
   if (remembered) return remembered;
 
-  const fb = resolve(expandHomePath(fallback));
+  const fb = canonicalizeWorkspacePath(fallback);
   if (fb !== home) {
     rememberActiveWorkspace(fb, dataRoot);
     return fb;

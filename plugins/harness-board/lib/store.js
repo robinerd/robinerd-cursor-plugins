@@ -1,8 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { expandHomePath } from "./workspace.js";
+import { dirname, join } from "node:path";
+import {
+  canonicalizeWorkspacePath,
+  workspaceIdentityKey,
+} from "./workspace.js";
+
+export { canonicalizeWorkspacePath, workspaceIdentityKey };
 
 /** @typedef {"planning" | "building" | "integrating" | "done" | "parked"} InitiativeStatus */
 /** @typedef {"ready" | "approved" | "implement" | "review" | "verify" | "done" | "blocked"} SliceColumn */
@@ -52,12 +57,12 @@ const INITIATIVE_STATUSES = new Set([
 ]);
 
 /**
- * Expand `~` / collapse `/~/`, then resolve to an absolute store key.
+ * Folder name under the data root for this workspace (canonical + case-folded on Windows).
  * @param {string} workspacePath
  * @returns {string}
  */
-export function canonicalizeWorkspacePath(workspacePath) {
-  return resolve(expandHomePath(workspacePath));
+export function workspaceBucketHash(workspacePath) {
+  return workspaceHash(workspaceIdentityKey(workspacePath));
 }
 
 /**
@@ -84,7 +89,7 @@ export function defaultDataRoot(dataRoot) {
 export function statePathFor(workspacePath, options = {}) {
   const root = defaultDataRoot(options.dataRoot);
   const key = canonicalizeWorkspacePath(workspacePath);
-  return join(root, workspaceHash(key), "state.json");
+  return join(root, workspaceBucketHash(key), "state.json");
 }
 
 /**
@@ -289,7 +294,7 @@ function mergeBoardStates(a, b, canonicalPath) {
  */
 async function consolidateOrphans(state, options = {}) {
   const key = canonicalizeWorkspacePath(state.workspacePath);
-  const canonicalHash = workspaceHash(key);
+  const canonicalHash = workspaceBucketHash(key);
   const root = defaultDataRoot(options.dataRoot);
 
   /** @type {string[]} */
@@ -314,7 +319,7 @@ async function consolidateOrphans(state, options = {}) {
       if (!parsed || typeof parsed !== "object") continue;
       const obj = /** @type {Record<string, unknown>} */ (parsed);
       if (typeof obj.workspacePath !== "string") continue;
-      if (canonicalizeWorkspacePath(obj.workspacePath) !== key) continue;
+      if (workspaceIdentityKey(obj.workspacePath) !== workspaceIdentityKey(key)) continue;
       orphans.push({
         dir: name,
         state: normalizeState(key, parsed),
