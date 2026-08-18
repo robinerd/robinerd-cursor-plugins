@@ -20,6 +20,6 @@ Using the active plan, review verdict, and §8 / verify output:
 When harness-board MCP is available and the active initiative is known (`planPath` / id):
 
 - **Entering the gate** (before/when asking): `initiative_upsert` with `awaitingHuman: true`. Keep title/`planPath`; do not wipe status. Soft-fail if MCP is unavailable. Always pass `workspace`.
-- Clear `awaitingHuman` only on a **decisive** outcome: accept (`done`), park, abandon, or revise/replan (work continues — then follow **ask-user** for further questions).
-- Do **not** clear for deferrals such as “I’ll test on the device and let you know,” even if you set status `integrating`.
-- Blocked slices already show the attention dot without this flag.
+- Clear `awaitingHuman` when the human **acknowledges** in chat — a decisive choice **or** a deferral such as “I’ll test on the device and let you know.” Work may stay `integrating`; slices may stay `blocked`.
+- If another question follows immediately, set `awaitingHuman: true` again (follow **ask-user**).
+- Do **not** treat a slice in the Blocked column as attention by itself.

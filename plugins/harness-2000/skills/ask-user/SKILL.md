@@ -31,10 +31,10 @@ Stay in **Agent mode**. Do **not** switch to Plan mode to ask questions.
 When harness-board MCP is available and the active initiative is known (`planPath` / id):
 
 - **Before** `AskQuestion` (or the prose fallback wait): `initiative_upsert` with `awaitingHuman: true`. Keep the existing `title` and `planPath`; do **not** wipe `status`. Soft-fail if MCP is unavailable.
-- **After** the human answers: set `awaitingHuman: false` **only if they are no longer on the hook**. If another question follows immediately, leave or set `true`.
+- **After** the human replies in that chat: set `awaitingHuman: false`. That includes a non-answer such as “Sure, let me get back to you later.” A slice may stay `blocked`; the wait is still **acknowledged**. If another question follows immediately, set `true` again.
 - Always pass `workspace` (absolute path of the agent’s project root). To operate on another board, pass that workspace’s absolute path instead.
 
-Blocked slices already show the attention dot without this flag.
+Do **not** treat a slice in the Blocked column as attention by itself.
 
 ## Slice gate (required before coding)
 
@@ -57,4 +57,4 @@ When drafting or finishing §§1–6, if a decision would change the plan output
 
 ## After the answer
 
-Apply the choice to the living plan, then continue the stage. Do **not** invent a default when the human was asked. Then clear or keep `awaitingHuman` as in **Board attention** above.
+Apply the choice to the living plan, then continue the stage. Do **not** invent a default when the human was asked. Then clear `awaitingHuman` as in **Board attention** above (any acknowledgement).
