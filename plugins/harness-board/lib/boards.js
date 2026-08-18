@@ -40,26 +40,15 @@ export function boardHasActiveWork(parsed) {
 }
 
 /**
- * @param {{ status?: unknown, awaitingHuman?: unknown, id?: unknown }} initiative
- * @param {unknown} slices
+ * Unacknowledged chat wait only — slice columns (including blocked) do not count.
+ * @param {{ status?: unknown, awaitingHuman?: unknown }} initiative
  * @returns {boolean}
  */
-export function initiativeNeedsAttention(initiative, slices) {
+export function initiativeNeedsAttention(initiative) {
   if (!initiative || typeof initiative !== "object") return false;
   const status = initiative.status;
   if (status === "parked" || status === "done") return false;
-  if (initiative.awaitingHuman === true) return true;
-  const initiativeId = initiative.id;
-  if (typeof initiativeId !== "string" || !initiativeId) return false;
-  if (!Array.isArray(slices)) return false;
-  return slices.some(
-    (s) =>
-      s &&
-      typeof s === "object" &&
-      /** @type {{ initiativeId?: unknown }} */ (s).initiativeId ===
-        initiativeId &&
-      /** @type {{ column?: unknown }} */ (s).column === "blocked",
-  );
+  return initiative.awaitingHuman === true;
 }
 
 /**
@@ -72,13 +61,9 @@ export function boardHasAttention(parsed) {
     parsed
   );
   if (!Array.isArray(obj.initiatives)) return false;
-  const slices = Array.isArray(obj.slices) ? obj.slices : [];
   return obj.initiatives.some((i) =>
     initiativeNeedsAttention(
-      /** @type {{ status?: unknown, awaitingHuman?: unknown, id?: unknown }} */ (
-        i
-      ),
-      slices,
+      /** @type {{ status?: unknown, awaitingHuman?: unknown }} */ (i),
     ),
   );
 }

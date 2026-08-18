@@ -149,51 +149,46 @@ test("listBoardSummaries hasActiveWork from initiative statuses; multiple boards
   }
 });
 
-test("initiativeNeedsAttention: parked/done never; flag and blocked slices", () => {
-  const slices = [{ initiativeId: "a", column: "blocked" }];
+test("initiativeNeedsAttention: parked/done never; flag only, not blocked column", () => {
   assert.equal(
-    initiativeNeedsAttention({ id: "a", status: "parked", awaitingHuman: true }, slices),
+    initiativeNeedsAttention({ id: "a", status: "parked", awaitingHuman: true }),
     false,
   );
   assert.equal(
-    initiativeNeedsAttention({ id: "a", status: "done", awaitingHuman: true }, slices),
+    initiativeNeedsAttention({ id: "a", status: "done", awaitingHuman: true }),
     false,
   );
   assert.equal(
-    initiativeNeedsAttention({ id: "a", status: "integrating" }, []),
+    initiativeNeedsAttention({ id: "a", status: "integrating" }),
     false,
   );
   assert.equal(
-    initiativeNeedsAttention(
-      { id: "a", status: "planning", awaitingHuman: true },
-      [],
-    ),
+    initiativeNeedsAttention({ id: "a", status: "planning", awaitingHuman: true }),
     true,
   );
   assert.equal(
-    initiativeNeedsAttention(
-      { id: "a", status: "building", awaitingHuman: true },
-      [],
-    ),
+    initiativeNeedsAttention({ id: "a", status: "building", awaitingHuman: true }),
     true,
   );
   assert.equal(
-    initiativeNeedsAttention(
-      { id: "a", status: "integrating", awaitingHuman: true },
-      [],
-    ),
+    initiativeNeedsAttention({
+      id: "a",
+      status: "integrating",
+      awaitingHuman: true,
+    }),
     true,
   );
   assert.equal(
-    initiativeNeedsAttention(
-      { id: "a", status: "building", awaitingHuman: false },
-      slices,
-    ),
-    true,
+    initiativeNeedsAttention({
+      id: "a",
+      status: "building",
+      awaitingHuman: false,
+    }),
+    false,
   );
 });
 
-test("boardHasAttention ORs initiatives using parsed slices", () => {
+test("boardHasAttention ORs initiatives from awaitingHuman only", () => {
   assert.equal(
     boardHasAttention({
       initiatives: [
@@ -216,13 +211,13 @@ test("boardHasAttention ORs initiatives using parsed slices", () => {
       initiatives: [{ id: "q", status: "building" }],
       slices: [{ initiativeId: "q", column: "blocked" }],
     }),
-    true,
+    false,
   );
   assert.equal(boardHasAttention({}), false);
   assert.equal(boardHasAttention(null), false);
 });
 
-test("listBoardSummaries hasAttention from derive, not stored field", async () => {
+test("listBoardSummaries hasAttention from awaitingHuman, not blocked slices", async () => {
   const dataRoot = await mkdtemp(join(tmpdir(), "harness-board-attn-"));
   try {
     const quiet = "/tmp/ws-quiet";
@@ -248,7 +243,7 @@ test("listBoardSummaries hasAttention from derive, not stored field", async () =
     );
     assert.equal(byPath[quiet], false);
     assert.equal(byPath[flagged], true);
-    assert.equal(byPath[blocked], true);
+    assert.equal(byPath[blocked], false);
     assert.equal("hasAttention" in boards[0], true);
   } finally {
     await rm(dataRoot, { recursive: true, force: true });
