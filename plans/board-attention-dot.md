@@ -1,6 +1,6 @@
 # Initiative: Board attention dot
 
-Status: active  
+Status: done  
 Tier: feature  
 Stage: 11-gate  
 Skips: _(none)_  
@@ -97,9 +97,10 @@ Living document — update in place when later work changes earlier conclusions.
 
 - **model-derive:** store + boards tests 19/19; reviewer approve; verifier pass. Board slice `d27aedb9` done.
 - **ui-dot:** e2e attention persist on GET; Active-only no marker; `/api/boards` `attention`. Reviewer approve; verifier pass. Slice `dd6c085e` done.
-- **ask-user-skill:** skills + README match §4. Reviewer approve; verifier pass. Slice `9457bce1` done. Live AskQuestion / plugin-reload visual still human.
+- **ask-user-skill:** skills + README match §4. Reviewer approve; verifier pass. Slice `9457bce1` done.
+- **Human live check (2026-08-18):** accepted after reload; bounce in PR #3 (blocked column does not auto-dot; chat acknowledgement including deferral clears the flag). Merged: #2 then #3.
 
 ## Gate (stage 11)
 
-- **Decision:** pending human (assess-release 2026-08-17)
-- **Notes:** All three slices verified. Reload Harness Board plugin (or `npm run board` from `plugins/harness-board`) to see dots. Installed MCP schema may lag until plugin cache refresh (`awaitingHuman` on `initiative_upsert`).
+- **Decision:** accept (2026-08-18)  
+- **Notes:** Human confirmed live behavior after plugin reload. Shipped via https://github.com/robinerd/robinerd-cursor-plugins/pull/2 and follow-up https://github.com/robinerd/robinerd-cursor-plugins/pull/3.
