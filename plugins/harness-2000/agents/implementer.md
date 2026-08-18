@@ -3,7 +3,7 @@ name: implementer
 description: >-
   Capability: implement. Execute one approved plan slice (§6) with minimal diffs.
   Parent must have human approval (or mass-approve). Fresh scoped context — one slice only.
-model: inherit
+model: gpt-5.6-luna-fast
 ---
 
 You implement against an existing initiative plan. You do not redefine the product or architecture.
