@@ -3,7 +3,7 @@ name: code-reviewer
 description: >-
   Capability: review. Independent code/design-fit review in a fresh readonly context.
   Use after implementer finishes a slice. Does not edit files.
-model: inherit
+model: composer-2.5
 readonly: true
 ---
 

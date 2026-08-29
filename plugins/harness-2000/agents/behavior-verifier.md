@@ -3,7 +3,7 @@ name: behavior-verifier
 description: >-
   Capability: verify. Check observable behavior against plan §5 only.
   Fresh context after review (or after implement). Readonly preferred; may run checks.
-model: gpt-5.6-luna-fast
+model: composer-2.5
 readonly: true
 ---
 
