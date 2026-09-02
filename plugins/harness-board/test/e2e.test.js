@@ -168,7 +168,9 @@ test("e2e happy path: upsert → … → done + HTML markers + persistence", asy
     assert.match(html, /Drive-script coverage for harness-board/);
     assert.match(html, /data-plan-link/);
     assert.match(html, /plans\/harness-board\.md/);
-    assert.match(html, /\/api\/plan\?/);
+    assert.match(html, /api\/plan\?/);
+    assert.doesNotMatch(html, /href="\/api\/plan\?/);
+    assert.match(html, /href="\?workspace=/);
 
     // Path traversal must be rejected:
     const trav = await fetch(

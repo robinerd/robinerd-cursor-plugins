@@ -146,6 +146,46 @@ test("renderBoardHtml: done starts collapsed; others expanded; toggle present", 
   assert.match(html, /harness-board:initiative-collapsed/);
 });
 
+test("renderBoardHtml: board and plan links are path-relative (proxy subpath safe)", () => {
+  const html = renderBoardHtml(
+    {
+      workspacePath: "/tmp/ws-a",
+      updatedAt: "2026-08-18T00:00:00.000Z",
+      initiatives: [
+        {
+          ...init("plan-1", "planning", "2026-08-18T00:00:00.000Z"),
+          planPath: "plans/demo.md",
+        },
+      ],
+      slices: [],
+    },
+    {
+      boards: [
+        {
+          workspacePath: "/tmp/ws-a",
+          hash: "aaa",
+          mtimeMs: 1,
+          selected: true,
+        },
+        {
+          workspacePath: "/tmp/ws-b",
+          hash: "bbb",
+          mtimeMs: 2,
+        },
+      ],
+      selectedWorkspace: "/tmp/ws-a",
+      selectedMtimeMs: 1,
+    },
+  );
+
+  assert.match(html, /href="\?workspace=/);
+  assert.doesNotMatch(html, /href="\/\?workspace=/);
+  assert.match(html, /href="api\/plan\?/);
+  assert.doesNotMatch(html, /href="\/api\/plan\?/);
+  assert.match(html, /var url = "api\/boards"/);
+  assert.doesNotMatch(html, /var url = "\/api\/boards"/);
+});
+
 test("renderBoardHtml: Integrating summaries show structured next steps in expanded and collapsed headers", () => {
   const html = renderBoardHtml({
     workspacePath: "/tmp/ws",

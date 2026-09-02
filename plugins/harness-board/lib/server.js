@@ -349,7 +349,8 @@ function planViewHref(workspacePath, planPath) {
     workspace: workspacePath,
     path: planPath,
   });
-  return `/api/plan?${qs.toString()}`;
+  // Relative so reverse-proxy mounts (e.g. /board/) keep the path prefix.
+  return `api/plan?${qs.toString()}`;
 }
 
 /**
@@ -511,7 +512,7 @@ export function renderBoardHtml(state, shell = {}) {
             const selected = Boolean(b.selected);
             const active = Boolean(b.active);
             const attention = Boolean(b.attention ?? b.hasAttention);
-            const href = `/?workspace=${encodeURIComponent(b.workspacePath)}`;
+            const href = `?workspace=${encodeURIComponent(b.workspacePath)}`;
             const classes = [
               "nav-item",
               selected ? "is-selected" : "",
@@ -896,7 +897,8 @@ export function renderBoardHtml(state, shell = {}) {
   applyPrefs();
 
   function poll() {
-    var url = "/api/boards";
+    // Relative so reverse-proxy mounts (e.g. /board/) keep the path prefix.
+    var url = "api/boards";
     if (selectedPath) {
       url += "?workspace=" + encodeURIComponent(selectedPath);
     }
