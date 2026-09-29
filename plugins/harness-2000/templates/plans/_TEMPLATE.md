@@ -69,6 +69,7 @@ Filled or refined when moving from §§1–6 decisions into implementation (stil
 - Key files or modules (expected).
 - Bounce triggers → update §4 (or earlier) if reality diverges.
 - **Approvals:** per-slice | mass-approve remaining (record choice + slice ids). One implementer subagent per slice; review + verify between slices.
+- **Auto mode:** `off` | `on` (this initiative + this chat until done/parked/revoked). When on: mass-approve remaining slice ids; log auto-taken decisions + residual risk here; list them at integrate / stage 11. Policy: ask-user skill (plain language; not a slash command). Revoke → `Auto mode: off`.
 
 ## 8. Verification record
 

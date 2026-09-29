@@ -1,6 +1,6 @@
 # Harness 2000 (Cursor plugin)
 
-Cursor-native full lifecycle in **Agent mode**: judgment (§§1–6) then gated implement, fresh **code-reviewer** / **behavior-verifier**, slash commands for stage transitions, soft protect hooks. Does **not** switch to Plan mode — clarifications use `/ask-user` (`AskQuestion` + `Custom: …`).
+Cursor-native full lifecycle in **Agent mode**: judgment (§§1–6) then gated implement, fresh **code-reviewer** / **behavior-verifier**, slash commands for stage transitions, soft protect hooks. Does **not** switch to Plan mode — clarifications use `/ask-user` (`AskQuestion` + `Custom: …`). Optional **auto mode** (say it in chat; not a slash command) mass-approves remaining slices and takes recommended/default reversible choices; policy lives in `skills/ask-user/SKILL.md`. Stage 11 still asks the human.
 
 ## Install
 
@@ -22,7 +22,7 @@ Do **not** junction/symlink from outside `plugins/local` — Cursor rejects exte
 
 ```text
 Agent (same chat): intake → feature (§1) → priority → design (§4) → verify-design (§5) → breakdown (§6)
-                 → ask-user gate (slice | mass-approve)
+                 → ask-user gate (slice | mass-approve | auto mode recorded)
                  → implementer (1 slice) → code-reviewer → behavior-verifier → (human if needed) → next slice…
                  → integrate → gate
 ```
