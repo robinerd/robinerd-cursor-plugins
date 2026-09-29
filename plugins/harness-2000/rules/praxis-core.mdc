@@ -19,8 +19,8 @@ When the user asks to follow harness-2000 / praxis (or equivalent), execute the 
 6. **Escalate, don't thrash.** At most one or two clean retries on a blocker, then: problem, tried, decision needed.
 7. **Stay in scope.** Implement only what §6 slices allow unless the human expands the plan.
 8. **Stay in Agent mode.** Never invoke a switch to Plan mode for praxis work. Planning/design happens in this chat via the living plan + `/ask-user`.
-9. **Clarify interactively.** For decisions that change plan output or gates, use **ask-user** / `AskQuestion` (multi-choice + `Custom: …`). Fallback to the same options in prose if the tool is missing.
-10. **Human gate before coding.** Before each implementation slice, get approval — or a recorded **mass-approve all remaining slices**. See `/ask-user` slice gate.
+9. **Clarify interactively.** For decisions that change plan output or gates, use **ask-user** / `AskQuestion` (multi-choice + `Custom: …`). Fallback to the same options in prose if the tool is missing. **Exception (opt-in auto mode):** do not invent ad-hoc defaults; apply the recommended/default per **ask-user** Auto mode, log on plan §7, and continue — except still AskQuestion on that skill’s escalate list (intent/shape, unconsidered blast radius, irreversible no-default, unsure, stage 11, secrets/prod/§6 human). Auto mode does **not** skip §§1–6.
+10. **Human gate before coding.** Before each implementation slice, get approval — or a recorded **mass-approve all remaining slices**. See `/ask-user` slice gate. **Exception (opt-in auto mode):** recorded `Auto mode: on` on §7 is mass-approve remaining for this initiative in this chat (until done/parked/revoked). Still one slice per **implementer**, then review and verify. Auto mode does **not** skip the human gate at stage 11.
 11. **Scoped subagents for implement.** One §6 slice per **implementer** subagent; then fresh **code-reviewer**; then **behavior-verifier** against §5 (slice-relevant). Main chat orchestrates, keeps the plan, and handles human checks — it should not absorb long implement diffs into its own context when a subagent can.
 12. **Board vs plan.** When sibling **harness-board** MCP is available, runtime slice/initiative status lives on the board; `plans/<id>.md` stays Intent/design (§§1–6 content). Subagents use only their role-bound board MCP tools (soft allowlists in agent docs; hard reject in MCP). Always pass `workspace` (absolute path of the agent’s project root) on every board MCP tool call. To operate on another board, pass that workspace’s absolute path instead. If board MCP is unavailable, note it and continue praxis without hard-blocking.
 
@@ -50,7 +50,7 @@ Write §§1–6 (or recorded skips) into the living plan, then implement §6 und
 
 ## Commands (cheat sheet)
 
-`/praxis-help` · `/start-work` · `/ask-user` · `/define-feature` · `/design-system` · `/design-verification` · `/create-work-packages` · `/implement-next` · `/review-current` · `/verify-current` · `/integrate` · `/assess-release` · `/bounce-plan` · `/status` · `/investigate`
+`/praxis-help` · `/start-work` · `/ask-user` · `/define-feature` · `/design-system` · `/design-verification` · `/create-work-packages` · `/implement-next` · `/review-current` · `/verify-current` · `/integrate` · `/assess-release` · `/bounce-plan` · `/status` · `/investigate` · **auto mode** (plain language in chat — not a slash command; policy in ask-user)
 
 ## Tier presets (`/start-work`)
 
