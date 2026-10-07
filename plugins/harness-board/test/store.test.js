@@ -12,11 +12,18 @@ import {
   saveState,
   statePathFor,
   upsertInitiative,
+  legacyWorkspaceBucketHash,
   workspaceBucketHash,
   workspaceHash,
   workspaceIdentityKey,
 } from "../lib/store.js";
-import { expandHomePath, sanitizeWorkspacePath } from "../lib/workspace.js";
+import { migrateSlugBuckets } from "../lib/migrate-slug.js";
+import {
+  expandHomePath,
+  sanitizeWorkspacePath,
+  workspaceFolderSlug,
+  workspaceSlugIdentityKey,
+} from "../lib/workspace.js";
 
 test("workspaceHash is stable truncated sha256", () => {
   const a = workspaceHash("D:\\proj\\one");
@@ -213,32 +220,49 @@ test("saveState writes under dataRoot/hash/state.json", async () => {
   }
 });
 
-test("load then save stay on one canonical bucket", async () => {
+test("same folder slug shares one bucket across different absolute paths", async () => {
   const dataRoot = await mkdtempSafe();
   try {
-    const home = homedir();
-    const good = join(home, "Documents", "GitHub", "cactus-canon-test");
-    const bad = join(home, "~", "Documents", "GitHub", "cactus-canon-test");
-    assert.notEqual(workspaceHash(bad), workspaceHash(canonicalizeWorkspacePath(good)));
+    const pathA = "/Users/alice/clones/robinerd-cursor-plugins";
+    const pathB = "/Users/bob/work/robinerd-cursor-plugins";
+    assert.equal(workspaceFolderSlug(pathA), "robinerd-cursor-plugins");
+    assert.equal(workspaceSlugIdentityKey(pathA), workspaceSlugIdentityKey(pathB));
+    assert.equal(workspaceBucketHash(pathA), workspaceBucketHash(pathB));
 
     await upsertInitiative(
-      bad,
-      { planPath: "plans/a.md", title: "From bad path" },
+      pathA,
+      { planPath: "plans/a.md", title: "From A" },
       { dataRoot },
     );
     await upsertInitiative(
-      good,
-      { planPath: "plans/b.md", title: "From good path" },
+      pathB,
+      { planPath: "plans/b.md", title: "From B" },
       { dataRoot },
     );
 
     const dirs = await boardDirs(dataRoot);
     assert.equal(dirs.length, 1);
-    assert.equal(dirs[0], workspaceBucketHash(good));
+    assert.equal(dirs[0], workspaceBucketHash(pathA));
 
-    const state = await getState(bad, { dataRoot });
-    assert.equal(state.workspacePath, canonicalizeWorkspacePath(good));
+    const state = await getState(pathB, { dataRoot });
     assert.equal(state.initiatives.length, 2);
+  } finally {
+    await rm(dataRoot, { recursive: true, force: true });
+  }
+});
+
+test("different folder slugs use different buckets", async () => {
+  const dataRoot = await mkdtempSafe();
+  try {
+    const pathA = "/tmp/ws-alpha";
+    const pathB = "/tmp/ws-beta";
+    assert.notEqual(workspaceBucketHash(pathA), workspaceBucketHash(pathB));
+
+    await upsertInitiative(pathA, { planPath: "plans/a.md", title: "A" }, { dataRoot });
+    await upsertInitiative(pathB, { planPath: "plans/b.md", title: "B" }, { dataRoot });
+
+    const dirs = await boardDirs(dataRoot);
+    assert.equal(dirs.length, 2);
   } finally {
     await rm(dataRoot, { recursive: true, force: true });
   }
@@ -274,6 +298,10 @@ test("canonicalizeWorkspacePath unifies drive case, slashes, trailing junk", () 
     workspaceIdentityKey("/tmp/Foo"),
     workspaceIdentityKey("/tmp/foo"),
   );
+  assert.notEqual(
+    workspaceBucketHash("/tmp/Foo"),
+    workspaceBucketHash("/tmp/foo"),
+  );
 
   assert.equal(
     canonicalizeWorkspacePath("\\\\server\\share\\proj\\"),
@@ -308,27 +336,26 @@ test("D: vs d: and slash variants share one store bucket", async () => {
   }
 });
 
-test("orphan drive-letter bucket merges into canonical and is deleted", async () => {
+test("legacy full-path bucket is invisible until migrate-slug runs", async () => {
   const dataRoot = await mkdtempSafe();
   try {
-    const pretty = "D:\\workspace\\orphan-case";
-    const oldRaw = "D:\\workspace\\orphan-case";
-    const oldHash = workspaceHash(oldRaw);
-    const canonicalHash = workspaceBucketHash(pretty);
-    assert.notEqual(oldHash, canonicalHash);
+    const ws = "D:\\workspace\\legacy-migrate-fixture";
+    const legacyHash = legacyWorkspaceBucketHash(ws);
+    const slugHash = workspaceBucketHash(ws);
+    assert.notEqual(legacyHash, slugHash);
 
-    const orphanDir = join(dataRoot, oldHash);
-    await mkdir(orphanDir, { recursive: true });
+    const legacyDir = join(dataRoot, legacyHash);
+    await mkdir(legacyDir, { recursive: true });
     await writeFile(
-      join(orphanDir, "state.json"),
+      join(legacyDir, "state.json"),
       `${JSON.stringify(
         {
-          workspacePath: oldRaw,
+          workspacePath: ws,
           initiatives: [
             {
-              id: "init-case-orphan",
-              planPath: "plans/orphan.md",
-              title: "Case orphan",
+              id: "init-legacy-1",
+              planPath: "plans/legacy.md",
+              title: "Legacy only",
               blurb: "",
               status: "planning",
               updatedAt: "2026-01-01T00:00:00.000Z",
@@ -343,48 +370,56 @@ test("orphan drive-letter bucket merges into canonical and is deleted", async ()
       "utf8",
     );
 
-    const state = await getState(pretty, { dataRoot });
-    assert.equal(state.workspacePath, pretty);
-    assert.ok(state.initiatives.some((i) => i.id === "init-case-orphan"));
+    const before = await getState(ws, { dataRoot });
+    assert.equal(before.initiatives.length, 0);
+
+    const result = await migrateSlugBuckets(dataRoot);
+    assert.equal(result.bucketsScanned, 1);
+    assert.equal(result.legacyDirsRemoved, 1);
+
+    const after = await getState(ws, { dataRoot });
+    assert.ok(after.initiatives.some((i) => i.id === "init-legacy-1"));
 
     const dirs = await boardDirs(dataRoot);
     assert.equal(dirs.length, 1);
-    assert.equal(dirs[0], canonicalHash);
+    assert.equal(dirs[0], slugHash);
   } finally {
     await rm(dataRoot, { recursive: true, force: true });
   }
 });
 
-test("orphan tilde bucket merges into canonical and is deleted", async () => {
+test("migrate-slug merges legacy bucket with existing slug bucket by id", async () => {
   const dataRoot = await mkdtempSafe();
   try {
-    const home = homedir();
-    const good = join(home, "Documents", "GitHub", "cactus-orphan-test");
-    // Pre-canonical bug: resolve does not expand ~, so this hashed differently.
-    const badRaw = `${home}/~/Documents/GitHub/cactus-orphan-test`;
-    const orphanHash = workspaceHash(badRaw);
-    const canonicalHash = workspaceBucketHash(good);
-    assert.notEqual(orphanHash, canonicalHash);
+    const ws = "/opt/host/robinerd-cursor-plugins";
+    const slugHash = workspaceBucketHash(ws);
+    const legacyHash = legacyWorkspaceBucketHash(ws);
 
-    const orphanDir = join(dataRoot, orphanHash);
-    await mkdir(orphanDir, { recursive: true });
+    await upsertInitiative(
+      ws,
+      { planPath: "plans/new.md", title: "Slug bucket" },
+      { dataRoot },
+    );
+
+    const legacyDir = join(dataRoot, legacyHash);
+    await mkdir(legacyDir, { recursive: true });
     await writeFile(
-      join(orphanDir, "state.json"),
+      join(legacyDir, "state.json"),
       `${JSON.stringify(
         {
-          workspacePath: good,
+          workspacePath: "/Users/laptop/robinerd-cursor-plugins",
           initiatives: [
             {
-              id: "init-orphan-1",
-              planPath: "plans/orphan.md",
-              title: "Orphan initiative",
+              id: "init-laptop-only",
+              planPath: "plans/laptop.md",
+              title: "From laptop path",
               blurb: "",
               status: "planning",
-              updatedAt: "2026-01-01T00:00:00.000Z",
+              updatedAt: "2026-02-01T00:00:00.000Z",
             },
           ],
           slices: [],
-          updatedAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-02-01T00:00:00.000Z",
         },
         null,
         2,
@@ -392,22 +427,16 @@ test("orphan tilde bucket merges into canonical and is deleted", async () => {
       "utf8",
     );
 
-    const { initiative } = await upsertInitiative(
-      good,
-      { planPath: "plans/new.md", title: "Canonical upsert" },
-      { dataRoot },
-    );
-    assert.ok(initiative.id);
+    await migrateSlugBuckets(dataRoot);
 
-    const state = await getState(badRaw, { dataRoot });
-    assert.equal(state.workspacePath, canonicalizeWorkspacePath(good));
-    assert.ok(state.initiatives.some((i) => i.id === "init-orphan-1"));
-    assert.ok(state.initiatives.some((i) => i.title === "Canonical upsert"));
+    const state = await getState("/Users/laptop/robinerd-cursor-plugins", { dataRoot });
+    assert.equal(state.initiatives.length, 2);
+    assert.ok(state.initiatives.some((i) => i.title === "Slug bucket"));
+    assert.ok(state.initiatives.some((i) => i.id === "init-laptop-only"));
 
     const dirs = await boardDirs(dataRoot);
     assert.equal(dirs.length, 1);
-    assert.equal(dirs[0], canonicalHash);
-    assert.equal(statePathFor(good, { dataRoot }), statePathFor(badRaw, { dataRoot }));
+    assert.equal(dirs[0], slugHash);
   } finally {
     await rm(dataRoot, { recursive: true, force: true });
   }

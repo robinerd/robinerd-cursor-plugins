@@ -4,7 +4,7 @@ import { defaultDataRoot, workspaceBucketHash } from "./store.js";
 import {
   canonicalizeWorkspacePath,
   looksWindowsPath,
-  workspaceIdentityKey,
+  workspaceSlugIdentityKey,
 } from "./workspace.js";
 
 /** Initiative statuses that mark a board as having Active work (UI). */
@@ -150,7 +150,7 @@ export async function listBoardSummaries(dataRoot) {
 export async function resolveSelectedWorkspace(opts = {}) {
   const boards = await listBoardSummaries(opts.dataRoot);
   const byIdentity = new Map(
-    boards.map((b) => [workspaceIdentityKey(b.workspacePath), b]),
+    boards.map((b) => [workspaceSlugIdentityKey(b.workspacePath), b]),
   );
   const byHash = new Map(boards.map((b) => [b.hash, b]));
 
@@ -163,7 +163,7 @@ export async function resolveSelectedWorkspace(opts = {}) {
     const trimmed = value.trim();
     if (!trimmed) return null;
     if (byHash.has(trimmed)) return byHash.get(trimmed).workspacePath;
-    const ident = workspaceIdentityKey(trimmed);
+    const ident = workspaceSlugIdentityKey(trimmed);
     if (byIdentity.has(ident)) return byIdentity.get(ident).workspacePath;
     // Allow selecting a workspace that has no state file yet (e2e / first write).
     return canonicalizeWorkspacePath(trimmed);
@@ -216,7 +216,7 @@ function dedupeBoardSummaries(boards) {
     const ident =
       looksWindowsPath(board.workspacePath) ||
       posix.isAbsolute(String(board.workspacePath).trim())
-        ? workspaceIdentityKey(board.workspacePath)
+        ? workspaceSlugIdentityKey(board.workspacePath)
         : board.hash;
     const existing = byIdentity.get(ident);
     if (!existing) {

@@ -1,13 +1,19 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import {
   canonicalizeWorkspacePath,
   workspaceIdentityKey,
+  workspaceSlugIdentityKey,
 } from "./workspace.js";
 
-export { canonicalizeWorkspacePath, workspaceIdentityKey };
+export {
+  canonicalizeWorkspacePath,
+  workspaceFolderSlug,
+  workspaceIdentityKey,
+  workspaceSlugIdentityKey,
+} from "./workspace.js";
 
 /** @typedef {"planning" | "building" | "integrating" | "done" | "parked"} InitiativeStatus */
 /** @typedef {"ready" | "approved" | "implement" | "review" | "verify" | "done" | "blocked"} SliceColumn */
@@ -58,11 +64,20 @@ const INITIATIVE_STATUSES = new Set([
 ]);
 
 /**
- * Folder name under the data root for this workspace (canonical + case-folded on Windows).
+ * Folder name under the data root for this workspace (slug + case-folded on Windows).
  * @param {string} workspacePath
  * @returns {string}
  */
 export function workspaceBucketHash(workspacePath) {
+  return workspaceHash(workspaceSlugIdentityKey(workspacePath));
+}
+
+/**
+ * Pre–folder-slug bucket folder name (full canonical path identity). Used by migrate CLI only.
+ * @param {string} workspacePath
+ * @returns {string}
+ */
+export function legacyWorkspaceBucketHash(workspacePath) {
   return workspaceHash(workspaceIdentityKey(workspacePath));
 }
 
@@ -128,7 +143,7 @@ export async function loadState(workspacePath, options = {}) {
       throw err;
     }
   }
-  return consolidateOrphans(state, options);
+  return { ...state, workspacePath: key };
 }
 
 /**
@@ -279,7 +294,7 @@ function unionById(a, b) {
  * @param {string} canonicalPath
  * @returns {BoardState}
  */
-function mergeBoardStates(a, b, canonicalPath) {
+export function mergeBoardStates(a, b, canonicalPath) {
   const updatedAt =
     (a.updatedAt || "") >= (b.updatedAt || "") ? a.updatedAt : b.updatedAt;
   return {
@@ -288,69 +303,6 @@ function mergeBoardStates(a, b, canonicalPath) {
     slices: unionById(a.slices, b.slices),
     updatedAt: updatedAt || new Date().toISOString(),
   };
-}
-
-/**
- * Find buckets whose JSON workspacePath canonicalizes to K but folder !== hash(K),
- * merge into canonical state, persist, and delete orphans.
- * @param {BoardState} state
- * @param {StoreOptions} [options]
- * @returns {Promise<BoardState>}
- */
-async function consolidateOrphans(state, options = {}) {
-  const key = canonicalizeWorkspacePath(state.workspacePath);
-  const canonicalHash = workspaceBucketHash(key);
-  const root = defaultDataRoot(options.dataRoot);
-
-  /** @type {string[]} */
-  let dirNames = [];
-  try {
-    dirNames = await readdir(root);
-  } catch (err) {
-    if (err && typeof err === "object" && "code" in err && err.code === "ENOENT") {
-      return { ...state, workspacePath: key };
-    }
-    throw err;
-  }
-
-  /** @type {{ dir: string, state: BoardState }[]} */
-  const orphans = [];
-  for (const name of dirNames) {
-    if (name === canonicalHash) continue;
-    const orphanPath = join(root, name, "state.json");
-    try {
-      const raw = await readFile(orphanPath, "utf8");
-      const parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== "object") continue;
-      const obj = /** @type {Record<string, unknown>} */ (parsed);
-      if (typeof obj.workspacePath !== "string") continue;
-      if (workspaceIdentityKey(obj.workspacePath) !== workspaceIdentityKey(key)) continue;
-      orphans.push({
-        dir: name,
-        state: normalizeState(key, parsed),
-      });
-    } catch {
-      // not a board bucket
-    }
-  }
-
-  let merged = { ...state, workspacePath: key };
-  if (orphans.length === 0) return merged;
-
-  for (const orphan of orphans) {
-    merged = mergeBoardStates(merged, orphan.state, key);
-  }
-  await saveState(merged, options);
-
-  for (const orphan of orphans) {
-    try {
-      await rm(join(root, orphan.dir), { recursive: true, force: true });
-    } catch {
-      // best-effort cleanup
-    }
-  }
-
-  return merged;
 }
 
 /**

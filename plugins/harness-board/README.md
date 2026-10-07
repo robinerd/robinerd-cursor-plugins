@@ -6,25 +6,31 @@ Agents advance cards only via **named MCP tools** (tool name binds role). There 
 
 ## Status
 
-v0.1.4: JSON store, transition engine, multi-board local HTTP UI (`npm run board`), and stdio MCP (`mcp.json`).
+v0.1.5: JSON store, transition engine, multi-board HTTP UI + **Streamable HTTP MCP** on the same server (`npm run board` → `/mcp`), and optional local stdio MCP (`mcp.json`).
 
-## Persist path
+## Persist path (folder-name identity)
 
-Board state is keyed by workspace folder path and written under:
+Board state is keyed by the **last path segment** of the canonical workspace path (the repo folder name / slug). On Windows-style paths, the slug is case-folded. Two machines with different absolute paths but the same folder name (e.g. `…/robinerd-cursor-plugins`) share one bucket when they use the same `HARNESS_BOARD_DATA_ROOT` or when remote MCP writes on the host store.
+
+On disk:
 
 ```text
-~/.cursor/harness-board/<workspace-hash>/state.json
+~/.cursor/harness-board/<slug-hash>/state.json
 ```
 
-(`workspace-hash` is a truncated SHA-256 of the absolute workspace path.)
+(`slug-hash` is a truncated SHA-256 of the slug identity string — **not** of the full absolute path.)
 
-Override for tests / local runs:
+**Legacy buckets:** Older installs used a hash of the full path. Run **`npm run migrate-slug` once per machine** (laptop and always-on host) to merge legacy buckets into slug buckets and remove orphan dirs. After migration, runtime code uses slug identity only; there is no migrate-on-start.
 
 | Env | Purpose |
 |-----|---------|
-| `HARNESS_BOARD_DATA_ROOT` | Optional store root instead of `~/.cursor/harness-board` (used by `bin/mcp.js` and the board UI) |
+| `HARNESS_BOARD_DATA_ROOT` | Optional store root instead of `~/.cursor/harness-board` (board server, stdio MCP, migrate CLI) |
+| `HARNESS_BOARD_HOST` | Listen address for `npm run board` (default `127.0.0.1`; use Tailscale IP or `0.0.0.0` on an always-on host) |
+| `HARNESS_BOARD_MCP_TOKEN` | When set, `/mcp` requires `Authorization: Bearer <token>`; when unset, `/mcp` is unauthenticated (local/dev only — set a token on any network-exposed host) |
 
-MCP tool targeting does **not** use env or a global pointer. Every MCP tool requires an absolute `workspace` argument per call. (`HARNESS_BOARD_WORKSPACE` is ignored if set.)
+MCP tool targeting does **not** use env or a global pointer. Every MCP tool requires an absolute `workspace` argument per call. (`HARNESS_BOARD_WORKSPACE` is ignored if set by MCP; the board UI may still use it as a default selection.)
+
+**Plans:** Initiative markdown stays on the agent machine (`plans/<id>.md`). The board host does not need those files; runtime status (blurbs, slice notes, evidence) lives on the board.
 
 ## Board UI (`npm run board`)
 
@@ -60,17 +66,54 @@ Pass absolute `workspace` on every tool call (agent root by default; any other a
 
 UI remains separate: open the board with `npm run board` (not an MCP tool).
 
+### Remote MCP (always-on host + laptop)
+
+On the **host**, leave the board server running (same process serves the kanban UI and MCP):
+
+```bash
+cd plugins/harness-board   # or plugin install path
+export HARNESS_BOARD_HOST=100.x.x.x    # Tailscale IP or 0.0.0.0
+export HARNESS_BOARD_MCP_TOKEN='…'     # shared secret; required on exposed hosts
+npm run board
+```
+
+MCP endpoint: `http://<host>:4173/mcp` (default port `4173`).
+
+On **client** machines, point Cursor at that URL (project or user `mcp.json`). Example:
+
+```json
+{
+  "mcpServers": {
+    "harness-board": {
+      "url": "http://100.x.x.x:4173/mcp",
+      "headers": {
+        "Authorization": "Bearer ${env:HARNESS_BOARD_MCP_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+Set `HARNESS_BOARD_MCP_TOKEN` in the client environment to match the host. Agents still pass absolute `workspace` on every tool call (their local clone path); the server maps it to the same slug bucket as on the host when folder names match.
+
+**Hard rule — no local fallback:** When using remote MCP, **disable** the Harness Board plugin stdio MCP on the laptop (turn off the plugin MCP entry or override `mcp.json` so only the remote `url` exists). If both remote and local stdio are enabled and the remote is down, Cursor may still expose local tools and agents will write a **local** board — silent split-brain. Unreachable remote → tools fail; that is preferred over silent local writes.
+
+Run **`npm run migrate-slug` once** on the host and once on each client that had legacy local buckets before switching to remote (or a shared `HARNESS_BOARD_DATA_ROOT`).
+
 ## Scripts
 
 | Command | Purpose |
 |---------|---------|
-| `npm test` | Store + transition + boards + e2e + MCP smoke tests |
-| `npm run board` | Local multi-board server (port 4173 by default, prints URL; no workspace env required) |
-| `npm run mcp` | stdio MCP server (Cursor launches this via `mcp.json`) |
+| `npm test` | Store + transition + boards + e2e + MCP smoke + HTTP MCP tests |
+| `npm run board` | Multi-board HTTP server (UI + `/mcp`; port 4173 by default) |
+| `npm run mcp` | stdio MCP server (local plugin / `mcp.json` only) |
+| `npm run migrate-slug` | One-off legacy full-path-hash → slug bucket migration |
 
 ## HTTP API
 
-Server binds `127.0.0.1:4173` by default and logs `http://127.0.0.1:4173`. In-process callers can pass `options.port` to select another port, including `0` for an ephemeral port.
+Server binds `HARNESS_BOARD_HOST` or `127.0.0.1`, port `4173` by default, and logs the listen URL. In-process callers can pass `options.port` to select another port, including `0` for an ephemeral port.
+
+Streamable HTTP MCP is mounted at **`POST/GET /mcp`** on the same server (see remote setup above).
 
 | Method | Path | Purpose |
 |--------|------|---------|
@@ -82,7 +125,7 @@ Server binds `127.0.0.1:4173` by default and logs `http://127.0.0.1:4173`. In-pr
 
 ## MCP tools
 
-Every tool requires `workspace` (absolute path). Store bucket = hash of that path. MCP does not read or update `active-workspace.txt`.
+Every tool requires `workspace` (absolute path). Store bucket = folder-name slug (see **Persist path**). MCP does not read or update `active-workspace.txt`.
 
 | Tool | Role | Purpose |
 |------|------|---------|
@@ -106,13 +149,16 @@ Illegal transitions and bad args return structured error JSON including `allowed
 .cursor-plugin/plugin.json
 mcp.json              # Cursor auto-discovery
 package.json
-bin/board.js          # npm run board
+bin/board.js          # npm run board (UI + /mcp)
 bin/mcp.js            # stdio MCP entry
+bin/migrate-slug.js   # npm run migrate-slug
 lib/store.js
 lib/transitions.js
 lib/boards.js         # list / resolve multi-board
 lib/workspace.js      # path helpers (legacy pointer unused by MCP)
-lib/server.js         # HTTP + dispatchAction + multi-board HTML
+lib/server.js         # HTTP + /mcp + dispatchAction + multi-board HTML
+lib/mcp-http.js       # Streamable HTTP MCP transport
 lib/mcp.js            # MCP tools → shared engine
+lib/migrate-slug.js   # legacy bucket migration
 test/
 ```

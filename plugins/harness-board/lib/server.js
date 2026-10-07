@@ -18,6 +18,11 @@ import {
   sliceApprove,
   verifierVerdict,
 } from "./transitions.js";
+import {
+  handleBoardMcpHttp,
+  sendMcpAuthError,
+  verifyMcpBearerAuth,
+} from "./mcp-http.js";
 
 /** @typedef {import("./store.js").BoardState} BoardState */
 /** @typedef {import("./store.js").StoreOptions} StoreOptions */
@@ -47,6 +52,7 @@ const COLUMN_LABELS = Object.freeze({
  * @property {string} [dataRoot]
  * @property {string} [host]
  * @property {number} [port]
+ * @property {string} [mcpToken] When set, `/mcp` requires Authorization: Bearer.
  */
 
 /**
@@ -990,6 +996,7 @@ export function createBoardServer(options = {}) {
   /** @type {StoreOptions} */
   const storeOptions = {};
   if (options.dataRoot) storeOptions.dataRoot = options.dataRoot;
+  const mcpToken = options.mcpToken || undefined;
 
   const server = http.createServer(async (req, res) => {
     try {
@@ -998,6 +1005,32 @@ export function createBoardServer(options = {}) {
         `http://${req.headers.host || "127.0.0.1"}`,
       );
       const method = req.method || "GET";
+
+      if (url.pathname === "/mcp") {
+        const auth = verifyMcpBearerAuth(req, mcpToken);
+        if (!auth.authorized) {
+          sendMcpAuthError(res, auth.status, auth.message);
+          return;
+        }
+        let parsedBody;
+        if (method === "POST") {
+          const raw = await readBody(req);
+          if (raw) {
+            try {
+              parsedBody = JSON.parse(raw);
+            } catch {
+              sendJson(res, 400, {
+                jsonrpc: "2.0",
+                error: { code: -32700, message: "Parse error" },
+                id: null,
+              });
+              return;
+            }
+          }
+        }
+        await handleBoardMcpHttp(req, res, parsedBody, storeOptions);
+        return;
+      }
 
       if (method === "GET" && url.pathname === "/api/boards") {
         const requested =

@@ -115,6 +115,35 @@ export function workspaceIdentityKey(workspacePath) {
 }
 
 /**
+ * Last path segment of the canonical workspace path (repo folder name / slug).
+ * @param {string} workspacePath
+ * @returns {string}
+ */
+export function workspaceFolderSlug(workspacePath) {
+  const canonical = canonicalizeWorkspacePath(workspacePath);
+  const normalized = canonical.replace(/\\/g, "/");
+  const parts = normalized.split("/").filter(Boolean);
+  if (parts.length === 0) return canonical;
+  const last = parts[parts.length - 1];
+  if (/^[A-Za-z]:$/.test(last) && parts.length === 1) return canonical;
+  return last;
+}
+
+/**
+ * Store bucket identity: folder slug, case-insensitive on Windows-style paths.
+ * @param {string} workspacePath
+ * @returns {string}
+ */
+export function workspaceSlugIdentityKey(workspacePath) {
+  const slug = workspaceFolderSlug(workspacePath);
+  const canonical = canonicalizeWorkspacePath(workspacePath);
+  if (usesWindowsPathApi(workspacePath) || usesWindowsPathApi(canonical)) {
+    return slug.toLowerCase();
+  }
+  return slug;
+}
+
+/**
  * Expand leading `~` and collapse corrupt `/~/` (or `\~\`) segments.
  * `path.resolve` does not expand `~`; without this, `~/proj` and
  * `/Users/u/~/proj` hash to different store buckets than the real path.
