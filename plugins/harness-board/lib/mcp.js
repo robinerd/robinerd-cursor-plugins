@@ -1,6 +1,11 @@
 import { resolve } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import {
+  countOpenInitiatives,
+  formatBoardSummary,
+  formatInitiativeCard,
+} from "./cards.js";
 import { getState } from "./store.js";
 import { dispatchAction } from "./server.js";
 import { ACTIONS, TransitionError } from "./transitions.js";
@@ -20,7 +25,12 @@ export {
 /** @typedef {import("./store.js").StoreOptions} StoreOptions */
 
 /** Read tools (not transition actions). */
-export const READ_TOOLS = Object.freeze(["board_get", "list_slices"]);
+export const READ_TOOLS = Object.freeze([
+  "board_get",
+  "list_slices",
+  "board_summary",
+  "initiative_card",
+]);
 
 /** Named mutation tools — tool name binds role (no move_card). */
 export const MUTATION_TOOLS = Object.freeze(Object.values(ACTIONS));
@@ -124,6 +134,40 @@ export async function callBoardTool(name, args = {}, env = {}) {
     return { ok: true, slices };
   }
 
+  if (name === "board_summary") {
+    const boardUiBase =
+      typeof toolArgs.boardUiBase === "string" ? toolArgs.boardUiBase : undefined;
+    const alsoRaw = toolArgs.alsoWorkspaces;
+    const also = Array.isArray(alsoRaw)
+      ? alsoRaw.filter((w) => typeof w === "string" && w.trim())
+      : [];
+    const paths = [workspacePath, ...also.map((w) => resolveExplicitWorkspace(w))];
+    const states = await Promise.all(
+      paths.map((p) => getState(p, storeOptions)),
+    );
+    const markdown = formatBoardSummary(states, { boardUiBase });
+    const boards = states.map((state) => ({
+      workspacePath: state.workspacePath,
+      openCount: countOpenInitiatives(state),
+    }));
+    return { ok: true, markdown, boards };
+  }
+
+  if (name === "initiative_card") {
+    const initiativeId = toolArgs.initiativeId;
+    if (typeof initiativeId !== "string" || !initiativeId.trim()) {
+      return { ok: false, error: "initiativeId is required" };
+    }
+    const state = await getState(workspacePath, storeOptions);
+    try {
+      const markdown = formatInitiativeCard(state, { initiativeId });
+      return { ok: true, markdown };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { ok: false, error: message };
+    }
+  }
+
   if (!MUTATION_TOOLS.includes(name)) {
     throw new TransitionError(
       `unknown action: ${name}; allowed: ${TOOL_NAMES.join(", ")}`,
@@ -181,6 +225,27 @@ export function createHarnessBoardMcpServer(env = {}) {
     "List slice cards for the given workspace; optional initiativeId filter.",
     { workspace: workspaceArg, initiativeId: z.string().optional() },
     run("list_slices"),
+  );
+
+  server.tool(
+    "board_summary",
+    "Markdown Board_Summary embed for open initiatives on one or more boards. Emit the returned `markdown` field as assistant prose (Conduit callout chrome).",
+    {
+      workspace: workspaceArg,
+      alsoWorkspaces: z.array(z.string()).optional(),
+      boardUiBase: z.string().optional(),
+    },
+    run("board_summary"),
+  );
+
+  server.tool(
+    "initiative_card",
+    "Markdown initiative card embed for one initiative. Emit the returned `markdown` field as assistant prose (Conduit callout chrome).",
+    {
+      workspace: workspaceArg,
+      initiativeId: z.string(),
+    },
+    run("initiative_card"),
   );
 
   server.tool(

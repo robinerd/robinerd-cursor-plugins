@@ -6,7 +6,11 @@ Agents advance cards only via **named MCP tools** (tool name binds role). There 
 
 ## Status
 
-v0.1.4: JSON store, transition engine, multi-board local HTTP UI (`npm run board`), and stdio MCP (`mcp.json`).
+v0.1.5: JSON store, transition engine, multi-board local HTTP UI (`npm run board`), stdio MCP (`mcp.json`), and read tools `board_summary` / `initiative_card` for chat embeds. **Agents:** paste each tool’s returned `markdown` into assistant prose (do not rely on the tool chip alone).
+
+## Chat embeds (agents)
+
+Call `board_summary` or `initiative_card`, then emit the returned **`markdown` in the assistant message** so Conduit/Open WebUI renders the Obsidian-style `:::` callouts. See the cursor-local-chat bridge README for when to emit.
 
 ## Persist path
 
@@ -23,6 +27,7 @@ Override for tests / local runs:
 | Env | Purpose |
 |-----|---------|
 | `HARNESS_BOARD_DATA_ROOT` | Optional store root instead of `~/.cursor/harness-board` (used by `bin/mcp.js` and the board UI) |
+| `HARNESS_BOARD_PUBLIC_URL` | Public base URL for `[[↗]]` board links in `board_summary` / `initiative_card` when `boardUiBase` is omitted (default `http://127.0.0.1:4173`). Set e.g. to your ngrok `/board` proxy URL for phone-readable links. |
 
 MCP tool targeting does **not** use env or a global pointer. Every MCP tool requires an absolute `workspace` argument per call. (`HARNESS_BOARD_WORKSPACE` is ignored if set.)
 
@@ -88,6 +93,8 @@ Every tool requires `workspace` (absolute path). Store bucket = hash of that pat
 |------|------|---------|
 | `board_get` | any | Full board state |
 | `list_slices` | any | Slice list (optional `initiativeId`) |
+| `board_summary` | any | `:::Board_Summary` markdown for open initiatives (`alsoWorkspaces?`, `boardUiBase?`); emit `markdown` as assistant prose |
+| `initiative_card` | any | `:::board-name` initiative card markdown for `initiativeId`; emit `markdown` as assistant prose |
 | `initiative_upsert` | orchestrator | Create/update initiative header (`blurb` and optional `nextSteps`) |
 | `slice_add` | orchestrator | Add slice in `ready` |
 | `slice_approve` | orchestrator | `ready` → `approved` |
