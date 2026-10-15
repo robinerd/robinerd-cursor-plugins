@@ -23,8 +23,6 @@ test("MCP tool names: read + mutations, no move_card", () => {
   assert.deepEqual(names, [...TOOL_NAMES]);
   assert.ok(READ_TOOLS.includes("board_get"));
   assert.ok(READ_TOOLS.includes("list_slices"));
-  assert.equal(READ_TOOLS.includes("board_summary"), false);
-  assert.equal(READ_TOOLS.includes("initiative_card"), false);
   for (const action of Object.values(ACTIONS)) {
     assert.ok(MUTATION_TOOLS.includes(action), `missing ${action}`);
     assert.ok(names.includes(action), `list missing ${action}`);

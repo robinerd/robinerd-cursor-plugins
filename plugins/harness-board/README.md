@@ -6,7 +6,7 @@ Agents advance cards only via **named MCP tools** (tool name binds role). There 
 
 ## Status
 
-v0.1.5: JSON store, transition engine, multi-board local HTTP UI (`npm run board`), and stdio MCP (`mcp.json`). Chat callout embeds live in the cursor-local-chat bridge (`local.customTools`), not this plugin.
+v0.1.5: JSON store, transition engine, multi-board local HTTP UI (`npm run board`), and stdio MCP (`mcp.json`).
 
 ## Persist path
 
