@@ -11,10 +11,20 @@ import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import {
   canonicalizeWorkspacePath,
+  resolveBoardWorkspacePath,
   workspaceIdentityKey,
 } from "./workspace.js";
 
-export { canonicalizeWorkspacePath, workspaceIdentityKey };
+export { canonicalizeWorkspacePath, resolveBoardWorkspacePath, workspaceIdentityKey };
+
+/**
+ * Hash/compare key after board-root resolve (worktrees, junction aliases).
+ * @param {string} workspacePath
+ * @returns {string}
+ */
+function boardWorkspaceIdentityKey(workspacePath) {
+  return workspaceIdentityKey(resolveBoardWorkspacePath(workspacePath));
+}
 
 /** @typedef {"planning" | "building" | "integrating" | "done" | "parked"} InitiativeStatus */
 /** @typedef {"ready" | "approved" | "implement" | "review" | "verify" | "done" | "blocked"} SliceColumn */
@@ -70,7 +80,7 @@ const INITIATIVE_STATUSES = new Set([
  * @returns {string}
  */
 export function workspaceBucketHash(workspacePath) {
-  return workspaceHash(workspaceIdentityKey(workspacePath));
+  return workspaceHash(boardWorkspaceIdentityKey(workspacePath));
 }
 
 /**
@@ -96,8 +106,7 @@ export function defaultDataRoot(dataRoot) {
  */
 export function statePathFor(workspacePath, options = {}) {
   const root = defaultDataRoot(options.dataRoot);
-  const key = canonicalizeWorkspacePath(workspacePath);
-  return join(root, workspaceBucketHash(key), "state.json");
+  return join(root, workspaceBucketHash(workspacePath), "state.json");
 }
 
 /**
@@ -106,7 +115,7 @@ export function statePathFor(workspacePath, options = {}) {
  */
 export function emptyState(workspacePath) {
   return {
-    workspacePath: canonicalizeWorkspacePath(workspacePath),
+    workspacePath: resolveBoardWorkspacePath(workspacePath),
     initiatives: [],
     slices: [],
     updatedAt: new Date().toISOString(),
@@ -119,8 +128,8 @@ export function emptyState(workspacePath) {
  * @returns {Promise<BoardState>}
  */
 export async function loadState(workspacePath, options = {}) {
-  const key = canonicalizeWorkspacePath(workspacePath);
-  const path = statePathFor(key, options);
+  const key = resolveBoardWorkspacePath(workspacePath);
+  const path = statePathFor(workspacePath, options);
   /** @type {BoardState} */
   let state;
   try {
@@ -146,7 +155,7 @@ export async function loadState(workspacePath, options = {}) {
  * @returns {Promise<void>}
  */
 export async function saveState(state, options = {}) {
-  const key = canonicalizeWorkspacePath(state.workspacePath);
+  const key = resolveBoardWorkspacePath(state.workspacePath);
   const path = statePathFor(key, options);
   await mkdir(dirname(path), { recursive: true });
   const next = {
@@ -396,7 +405,7 @@ function mergeBoardStates(a, b, canonicalPath) {
  * @returns {Promise<BoardState>}
  */
 async function consolidateOrphans(state, options = {}) {
-  const key = canonicalizeWorkspacePath(state.workspacePath);
+  const key = resolveBoardWorkspacePath(state.workspacePath);
   const canonicalHash = workspaceBucketHash(key);
   const root = defaultDataRoot(options.dataRoot);
 
@@ -422,7 +431,9 @@ async function consolidateOrphans(state, options = {}) {
       if (!parsed || typeof parsed !== "object") continue;
       const obj = /** @type {Record<string, unknown>} */ (parsed);
       if (typeof obj.workspacePath !== "string") continue;
-      if (workspaceIdentityKey(obj.workspacePath) !== workspaceIdentityKey(key)) continue;
+      if (boardWorkspaceIdentityKey(obj.workspacePath) !== boardWorkspaceIdentityKey(key)) {
+        continue;
+      }
       orphans.push({
         dir: name,
         state: normalizeState(key, parsed),

@@ -1,6 +1,13 @@
 import path from "node:path";
 import { homedir } from "node:os";
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import {
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  existsSync,
+  realpathSync,
+} from "node:fs";
+import { spawnSync } from "node:child_process";
 import { defaultDataRoot } from "./store.js";
 
 const { join, posix, win32 } = path;
@@ -112,6 +119,74 @@ export function workspaceIdentityKey(workspacePath) {
     return canonical.toLowerCase();
   }
   return canonical;
+}
+
+/**
+ * First `worktree` path from `git worktree list --porcelain` (main checkout).
+ * @param {string} porcelain
+ * @returns {string | null}
+ */
+export function parseMainWorktreeFromPorcelain(porcelain) {
+  if (typeof porcelain !== "string" || !porcelain) return null;
+  for (const line of porcelain.split(/\r?\n/)) {
+    if (line.startsWith("worktree ")) {
+      const p = line.slice("worktree ".length).trim();
+      return p || null;
+    }
+  }
+  return null;
+}
+
+/**
+ * Discover the main worktree root for a git checkout. Soft-fail → null.
+ * @param {string} dir absolute or resolvable directory inside a worktree
+ * @returns {string | null}
+ */
+export function discoverMainWorktreeRoot(dir) {
+  if (typeof dir !== "string" || !dir.trim()) return null;
+  try {
+    const result = spawnSync(
+      "git",
+      ["-C", dir, "worktree", "list", "--porcelain"],
+      { encoding: "utf8", timeout: 15_000 },
+    );
+    if (result.error || result.status !== 0) return null;
+    const raw = parseMainWorktreeFromPorcelain(result.stdout ?? "");
+    return raw ? canonicalizeWorkspacePath(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Physical path after alias collapse; unchanged when path is missing.
+ * @param {string} canonical from {@link canonicalizeWorkspacePath}
+ * @returns {string}
+ */
+function realpathIfPresent(canonical) {
+  try {
+    if (!existsSync(canonical)) return canonical;
+    const physical = realpathSync.native(canonical);
+    return canonicalizeWorkspacePath(physical);
+  } catch {
+    return canonical;
+  }
+}
+
+/**
+ * Board store identity root: realpath aliases, then main git worktree root when applicable.
+ * Soft-fail: missing path, non-git, or git errors → realpath or canonical only.
+ * @param {string} workspacePath
+ * @returns {string}
+ */
+export function resolveBoardWorkspacePath(workspacePath) {
+  const canonical = canonicalizeWorkspacePath(workspacePath);
+  const physical = realpathIfPresent(canonical);
+  const mainRoot = discoverMainWorktreeRoot(physical);
+  if (mainRoot) {
+    return canonicalizeWorkspacePath(mainRoot);
+  }
+  return physical;
 }
 
 /**

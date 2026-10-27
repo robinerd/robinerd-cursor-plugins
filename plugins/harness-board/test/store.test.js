@@ -1,5 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
+import { execFileSync } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -17,7 +26,11 @@ import {
   workspaceHash,
   workspaceIdentityKey,
 } from "../lib/store.js";
-import { expandHomePath, sanitizeWorkspacePath } from "../lib/workspace.js";
+import {
+  expandHomePath,
+  resolveBoardWorkspacePath,
+  sanitizeWorkspacePath,
+} from "../lib/workspace.js";
 
 test("workspaceHash is stable truncated sha256", () => {
   const a = workspaceHash("D:\\proj\\one");
@@ -65,7 +78,7 @@ test("load missing file yields empty state", async () => {
   const dataRoot = await mkdtempSafe();
   try {
     const ws = "/tmp/workspace/missing-fixture";
-    const key = canonicalizeWorkspacePath(ws);
+    const key = resolveBoardWorkspacePath(ws);
     const state = await loadState(ws, { dataRoot });
     assert.deepEqual(state.initiatives, []);
     assert.deepEqual(state.slices, []);
@@ -79,7 +92,7 @@ test("save/load round-trip + upsertInitiative + addSlice", async () => {
   const dataRoot = await mkdtempSafe();
   try {
     const ws = "/tmp/workspace/round-trip";
-    const key = canonicalizeWorkspacePath(ws);
+    const key = resolveBoardWorkspacePath(ws);
     const { initiative } = await upsertInitiative(
       ws,
       {
@@ -193,7 +206,7 @@ test("upsertInitiative persist and preserve awaitingHuman", async () => {
 
 test("emptyState shape", () => {
   const s = emptyState("/tmp/ws");
-  assert.equal(s.workspacePath, canonicalizeWorkspacePath("/tmp/ws"));
+  assert.equal(s.workspacePath, resolveBoardWorkspacePath("/tmp/ws"));
   assert.deepEqual(s.initiatives, []);
   assert.deepEqual(s.slices, []);
   assert.ok(typeof s.updatedAt === "string");
@@ -203,14 +216,14 @@ test("saveState writes under dataRoot/hash/state.json", async () => {
   const dataRoot = await mkdtempSafe();
   try {
     const ws = "/tmp/save-path-ws";
-    const key = canonicalizeWorkspacePath(ws);
+    const key = resolveBoardWorkspacePath(ws);
     const state = emptyState(ws);
     await saveState(state, { dataRoot });
-    const expected = join(dataRoot, workspaceBucketHash(key), "state.json");
+    const expected = join(dataRoot, workspaceBucketHash(ws), "state.json");
     const raw = await readFile(expected, "utf8");
-    assert.ok(raw.includes(key));
+    const parsed = JSON.parse(raw);
+    assert.equal(parsed.workspacePath, key);
     assert.equal(raw.trimEnd().endsWith("}"), true);
-    JSON.parse(raw);
   } finally {
     await rm(dataRoot, { recursive: true, force: true });
   }
@@ -234,7 +247,7 @@ test("loadState recovers state.json with trailing junk from torn write", async (
   const dataRoot = await mkdtempSafe();
   try {
     const ws = "/tmp/workspace/torn-write";
-    const key = canonicalizeWorkspacePath(ws);
+    const key = resolveBoardWorkspacePath(ws);
     const path = statePathFor(ws, { dataRoot });
     await mkdir(dirname(path), { recursive: true });
     const good = {
@@ -372,10 +385,102 @@ test("load then save stay on one canonical bucket", async () => {
     assert.equal(dirs[0], workspaceBucketHash(good));
 
     const state = await getState(bad, { dataRoot });
-    assert.equal(state.workspacePath, canonicalizeWorkspacePath(good));
+    assert.equal(state.workspacePath, resolveBoardWorkspacePath(good));
     assert.equal(state.initiatives.length, 2);
   } finally {
     await rm(dataRoot, { recursive: true, force: true });
+  }
+});
+
+test("distinct non-git directories keep separate store buckets", async () => {
+  const dataRoot = await mkdtempSafe();
+  const a = await mkdtemp(join(tmpdir(), "hb-store-a-"));
+  const b = await mkdtemp(join(tmpdir(), "hb-store-b-"));
+  try {
+    await upsertInitiative(a, { planPath: "plans/a.md", title: "A" }, { dataRoot });
+    await upsertInitiative(b, { planPath: "plans/b.md", title: "B" }, { dataRoot });
+    assert.notEqual(
+      workspaceBucketHash(a),
+      workspaceBucketHash(b),
+    );
+    const dirs = await boardDirs(dataRoot);
+    assert.equal(dirs.length, 2);
+  } finally {
+    await rm(dataRoot, { recursive: true, force: true });
+    await rm(a, { recursive: true, force: true });
+    await rm(b, { recursive: true, force: true });
+  }
+});
+
+test("directory alias shares store bucket with resolved real path", async () => {
+  const dataRoot = await mkdtempSafe();
+  const root = await mkdtemp(join(tmpdir(), "hb-store-alias-"));
+  const real = join(root, "real");
+  const alias = join(root, "alias");
+  await mkdir(real);
+  const linkType = process.platform === "win32" ? "junction" : "dir";
+  await symlink(real, alias, linkType);
+  try {
+    await upsertInitiative(real, { planPath: "plans/r.md", title: "Real" }, { dataRoot });
+    const fromAlias = await loadState(alias, { dataRoot });
+    assert.equal(fromAlias.workspacePath, resolveBoardWorkspacePath(real));
+    assert.equal(fromAlias.initiatives.length, 1);
+    assert.equal(statePathFor(alias, { dataRoot }), statePathFor(real, { dataRoot }));
+    assert.equal((await boardDirs(dataRoot)).length, 1);
+  } finally {
+    await rm(dataRoot, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("linked git worktree load/save uses main root bucket", async (t) => {
+  if (!gitAvailable()) {
+    t.skip("git not on PATH");
+    return;
+  }
+  const dataRoot = await mkdtempSafe();
+  const root = await mkdtemp(join(tmpdir(), "hb-store-wt-"));
+  const main = join(root, "main");
+  const linked = join(root, "linked");
+  await mkdir(main);
+  git(main, "init");
+  git(main, "config", "user.email", "t@example.com");
+  git(main, "config", "user.name", "t");
+  await writeFile(join(main, "f.txt"), "x\n");
+  git(main, "add", "f.txt");
+  git(main, "commit", "-m", "init");
+  git(main, "branch", "feature");
+  git(main, "worktree", "add", linked, "feature");
+
+  try {
+    const mainKey = resolveBoardWorkspacePath(main);
+    await upsertInitiative(
+      main,
+      { planPath: "plans/wt.md", title: "From main" },
+      { dataRoot },
+    );
+    const fromLinked = await loadState(linked, { dataRoot });
+    assert.equal(fromLinked.workspacePath, mainKey);
+    assert.equal(fromLinked.initiatives.length, 1);
+    assert.equal(statePathFor(linked, { dataRoot }), statePathFor(main, { dataRoot }));
+
+    await upsertInitiative(
+      linked,
+      { planPath: "plans/wt2.md", title: "From linked" },
+      { dataRoot },
+    );
+    const reloaded = await getState(main, { dataRoot });
+    assert.equal(reloaded.workspacePath, mainKey);
+    assert.equal(reloaded.initiatives.length, 2);
+    assert.equal((await boardDirs(dataRoot)).length, 1);
+  } finally {
+    try {
+      git(main, "worktree", "remove", linked, "--force");
+    } catch {
+      // best-effort cleanup
+    }
+    await rm(dataRoot, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true });
   }
 });
 
@@ -405,10 +510,12 @@ test("canonicalizeWorkspacePath unifies drive case, slashes, trailing junk", () 
     canonicalizeWorkspacePath("  /tmp/foo/  "),
     canonicalizeWorkspacePath("/tmp/foo"),
   );
-  assert.notEqual(
-    workspaceIdentityKey("/tmp/Foo"),
-    workspaceIdentityKey("/tmp/foo"),
-  );
+  if (process.platform !== "win32") {
+    assert.notEqual(
+      workspaceIdentityKey("/tmp/Foo"),
+      workspaceIdentityKey("/tmp/foo"),
+    );
+  }
 
   assert.equal(
     canonicalizeWorkspacePath("\\\\server\\share\\proj\\"),
@@ -535,7 +642,7 @@ test("orphan tilde bucket merges into canonical and is deleted", async () => {
     assert.ok(initiative.id);
 
     const state = await getState(badRaw, { dataRoot });
-    assert.equal(state.workspacePath, canonicalizeWorkspacePath(good));
+    assert.equal(state.workspacePath, resolveBoardWorkspacePath(good));
     assert.ok(state.initiatives.some((i) => i.id === "init-orphan-1"));
     assert.ok(state.initiatives.some((i) => i.title === "Canonical upsert"));
 
@@ -547,6 +654,20 @@ test("orphan tilde bucket merges into canonical and is deleted", async () => {
     await rm(dataRoot, { recursive: true, force: true });
   }
 });
+
+function gitAvailable() {
+  try {
+    execFileSync("git", ["--version"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** @param {string} cwd @param {...string} args */
+function git(cwd, ...args) {
+  execFileSync("git", args, { cwd, stdio: "pipe", encoding: "utf8" });
+}
 
 /** @returns {Promise<string>} */
 async function mkdtempSafe() {

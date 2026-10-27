@@ -10,13 +10,25 @@ v0.1.5: JSON store, transition engine, multi-board local HTTP UI (`npm run board
 
 ## Persist path
 
-Board state is keyed by workspace folder path and written under:
+Board state is keyed by **board workspace identity** (not necessarily the literal path you pass in) and written under:
 
 ```text
 ~/.cursor/harness-board/<workspace-hash>/state.json
 ```
 
-(`workspace-hash` is a truncated SHA-256 of the absolute workspace path.)
+(`workspace-hash` is a truncated SHA-256 of the resolved identity key — see **Workspace identity (remap)** below.)
+
+### Workspace identity (remap)
+
+Load, save, MCP, and the board UI all resolve the store bucket via `resolveBoardWorkspacePath`:
+
+1. **Canonicalize** the path (trim, `~` expansion, `.`/`..`, unified separators, Windows drive letter).
+2. **Realpath** when the path exists (directory junctions on Windows, symlinks elsewhere — aliases share one physical bucket).
+3. **Git worktrees:** when the path is inside a git checkout, map to the **main worktree** root (first `worktree` line from `git worktree list --porcelain`). Linked worktrees therefore read and write the same board as the primary checkout.
+
+Soft-fail: missing paths, non-git trees, or git errors stop after realpath/canonicalize (no worktree remap).
+
+On load, the store also merges **orphan buckets** whose saved `workspacePath` canonicalizes to the same identity but live under an old hash folder (for example pre-remap worktree paths or path spelling variants), then deletes those orphan folders.
 
 Override for tests / local runs:
 
@@ -67,6 +79,43 @@ UI remains separate: open the board with `npm run board` (not an MCP tool).
 | `npm test` | Store + transition + boards + e2e + MCP smoke tests |
 | `npm run board` | Local multi-board server (port 4173 by default, prints URL; no workspace env required) |
 | `npm run mcp` | stdio MCP server (Cursor launches this via `mcp.json`) |
+| `npm run migrate:identity` | One-shot CLI to merge split buckets onto remapped identity (see below) |
+
+### Identity migration CLI (`npm run migrate:identity`)
+
+Use this **once per machine** after upgrading to worktree/junction-aware identity, if you already have board data under duplicate hash folders (for example a linked worktree bucket separate from the main checkout).
+
+**Not automatic.** Nothing runs migrate on Cursor startup or MCP connect. A human must review output on **live** data under `~/.cursor/harness-board` (or your custom root).
+
+**Default is dry-run.** With no flags, the CLI only scans and prints a JSON report (`mode: "dry-run"`) — no writes.
+
+```bash
+# From the harness-board plugin directory (or use node bin/migrate-board-identity.js)
+npm run migrate:identity
+npm run migrate:identity -- --dry-run          # explicit dry-run
+npm run migrate:identity -- --data-root "D:\path\to\harness-board-store"
+```
+
+Review the report: each merge lists `boardRoot`, target `masterHash`, `removeHashes`, and per-source initiative/slice counts.
+
+**Apply only after a clean dry-run you accept:**
+
+```bash
+npm run migrate:identity -- --apply
+npm run migrate:identity -- --apply --data-root "D:\path\to\harness-board-store"
+```
+
+`--apply` **always** copies the entire data root to a timestamped sibling folder (`…-backup-…-pre-identity-migrate`) before changing anything. If backup fails, migrate aborts with no writes.
+
+**Risks:** `--apply` can delete orphan hash directories after merging. If the process stops mid-run (crash, kill, disk full), you can be left with a **partial apply** — some groups merged, others not. **Keep the backup** until you have verified boards in the UI and MCP; restore from the backup folder if anything looks wrong.
+
+Flags:
+
+| Flag | Purpose |
+|------|---------|
+| *(none)* or `--dry-run` | Report only (default when `--apply` omitted) |
+| `--apply` | Backup, then merge groups and remove redundant buckets |
+| `--data-root PATH` | Store root (default: `~/.cursor/harness-board`, same as `HARNESS_BOARD_DATA_ROOT`) |
 
 ## HTTP API
 
