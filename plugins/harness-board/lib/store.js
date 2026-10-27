@@ -124,6 +124,8 @@ export async function loadState(workspacePath, options = {}) {
   /** @type {BoardState} */
   let state;
   try {
+    // An open read handle blocks the rename on Windows; let queued writes land first.
+    await pendingWrites.get(path)?.catch(() => {});
     const raw = await readFile(path, "utf8");
     const parsed = parseJsonDocument(raw);
     // Always pin to the canonical load key so saveState cannot redirect.
@@ -180,7 +182,29 @@ export function parseJsonDocument(raw) {
  * @param {string} contents
  * @returns {Promise<void>}
  */
-export async function atomicWriteFile(filePath, contents) {
+export function atomicWriteFile(filePath, contents) {
+  const prev = pendingWrites.get(filePath) ?? Promise.resolve();
+  const next = prev.catch(() => {}).then(() => writeViaTempRename(filePath, contents));
+  pendingWrites.set(filePath, next);
+  next.finally(() => {
+    if (pendingWrites.get(filePath) === next) pendingWrites.delete(filePath);
+  }).catch(() => {});
+  return next;
+}
+
+/**
+ * Per-path write queue: same-process renames onto one destination contend
+ * with EPERM on Windows, and queueing keeps the last save the one on disk.
+ * @type {Map<string, Promise<void>>}
+ */
+const pendingWrites = new Map();
+
+/**
+ * @param {string} filePath
+ * @param {string} contents
+ * @returns {Promise<void>}
+ */
+async function writeViaTempRename(filePath, contents) {
   const dir = dirname(filePath);
   const tmp = join(
     dir,
@@ -188,14 +212,37 @@ export async function atomicWriteFile(filePath, contents) {
   );
   await writeFile(tmp, contents, "utf8");
   try {
-    if (process.platform === "win32") {
-      // Windows rename cannot replace an existing destination.
-      await rm(filePath, { force: true });
-    }
-    await rename(tmp, filePath);
+    await renameWithRetry(tmp, filePath);
   } catch (err) {
     await rm(tmp, { force: true }).catch(() => {});
     throw err;
+  }
+}
+
+const RENAME_RETRY_CODES = new Set(["EPERM", "EACCES", "EBUSY"]);
+const RENAME_RETRY_DELAYS_MS = [10, 20, 40, 80, 160, 320, 400, 500];
+
+/**
+ * Node's rename replaces the destination on Windows too, but fails with
+ * EPERM/EACCES/EBUSY while another process has it open (e.g. a concurrent
+ * readFile). Never delete the destination first: a reader in that gap would
+ * see ENOENT, load an empty board, and a later save would wipe the real one.
+ * @param {string} from
+ * @param {string} to
+ * @returns {Promise<void>}
+ */
+async function renameWithRetry(from, to) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await rename(from, to);
+      return;
+    } catch (err) {
+      const code = err && typeof err === "object" && "code" in err ? err.code : undefined;
+      if (!RENAME_RETRY_CODES.has(code) || attempt >= RENAME_RETRY_DELAYS_MS.length) throw err;
+      // Jitter so retries don't stay phase-locked with a polling reader.
+      const delay = RENAME_RETRY_DELAYS_MS[attempt] * (0.5 + Math.random());
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
   }
 }
 

@@ -300,6 +300,54 @@ test("concurrent saveState leaves a single parseable state.json", async () => {
   }
 });
 
+test("readers never see a missing state.json during concurrent saves", async () => {
+  const dataRoot = await mkdtempSafe();
+  try {
+    const ws = "/tmp/workspace/save-vs-load";
+    const { initiative } = await upsertInitiative(
+      ws,
+      { planPath: "plans/r.md", title: "Base" },
+      { dataRoot },
+    );
+    let saving = true;
+    const writers = Promise.all(
+      Array.from({ length: 40 }, (_, i) =>
+        upsertInitiative(
+          ws,
+          { id: initiative.id, planPath: "plans/r.md", title: `W${i}` },
+          { dataRoot },
+        ),
+      ),
+    ).finally(() => {
+      saving = false;
+    });
+    const path = statePathFor(ws, { dataRoot });
+    let loads = 0;
+    let rawReads = 0;
+    const loaders = Array.from({ length: 4 }, async () => {
+      while (saving) {
+        const state = await loadState(ws, { dataRoot });
+        assert.equal(state.initiatives.length, 1, "load saw an empty board");
+        loads++;
+      }
+    });
+    // Bypasses the in-process write queue, like the board UI server process.
+    // Polling much faster than this starves Windows rename (open files can't be replaced).
+    const rawReader = (async () => {
+      while (saving) {
+        const parsed = JSON.parse(await readFile(path, "utf8"));
+        assert.equal(parsed.initiatives.length, 1);
+        rawReads++;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+    })();
+    await Promise.all([writers, ...loaders, rawReader]);
+    assert.ok(loads > 0 && rawReads > 0);
+  } finally {
+    await rm(dataRoot, { recursive: true, force: true });
+  }
+});
+
 test("load then save stay on one canonical bucket", async () => {
   const dataRoot = await mkdtempSafe();
   try {
