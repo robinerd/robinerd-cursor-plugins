@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import {
   addSlice,
@@ -9,6 +9,7 @@ import {
   emptyState,
   getState,
   loadState,
+  parseJsonDocument,
   saveState,
   statePathFor,
   upsertInitiative,
@@ -208,6 +209,92 @@ test("saveState writes under dataRoot/hash/state.json", async () => {
     const expected = join(dataRoot, workspaceBucketHash(key), "state.json");
     const raw = await readFile(expected, "utf8");
     assert.ok(raw.includes(key));
+    assert.equal(raw.trimEnd().endsWith("}"), true);
+    JSON.parse(raw);
+  } finally {
+    await rm(dataRoot, { recursive: true, force: true });
+  }
+});
+
+test("parseJsonDocument keeps leading object when trailing junk remains", () => {
+  const good = {
+    workspacePath: "/tmp/ws",
+    initiatives: [],
+    slices: [],
+    updatedAt: "2026-09-21T21:00:45.723Z",
+  };
+  const body = `${JSON.stringify(good, null, 2)}\n`;
+  const junk = ` ]\n    }\n  ],\n  "updatedAt": "2026-09-21T21:00:45.722Z"\n}\n`;
+  const parsed = parseJsonDocument(body + junk);
+  assert.deepEqual(parsed, good);
+  assert.throws(() => JSON.parse(body + junk), /non-whitespace|Unexpected/);
+});
+
+test("loadState recovers state.json with trailing junk from torn write", async () => {
+  const dataRoot = await mkdtempSafe();
+  try {
+    const ws = "/tmp/workspace/torn-write";
+    const key = canonicalizeWorkspacePath(ws);
+    const path = statePathFor(ws, { dataRoot });
+    await mkdir(dirname(path), { recursive: true });
+    const good = {
+      workspacePath: key,
+      initiatives: [
+        {
+          id: "i1",
+          planPath: "plans/a.md",
+          title: "Kept",
+          blurb: "",
+          status: "planning",
+          updatedAt: "2026-09-21T21:00:45.723Z",
+        },
+      ],
+      slices: [],
+      updatedAt: "2026-09-21T21:00:45.723Z",
+    };
+    const torn =
+      `${JSON.stringify(good, null, 2)}\n` +
+      ` ]\n    }\n  ],\n  "updatedAt": "2026-09-21T21:00:45.722Z"\n}\n`;
+    await writeFile(path, torn, "utf8");
+    assert.throws(() => JSON.parse(torn), SyntaxError);
+
+    const state = await loadState(ws, { dataRoot });
+    assert.equal(state.workspacePath, key);
+    assert.equal(state.initiatives.length, 1);
+    assert.equal(state.initiatives[0].title, "Kept");
+  } finally {
+    await rm(dataRoot, { recursive: true, force: true });
+  }
+});
+
+test("concurrent saveState leaves a single parseable state.json", async () => {
+  const dataRoot = await mkdtempSafe();
+  try {
+    const ws = "/tmp/workspace/concurrent-save";
+    const { initiative } = await upsertInitiative(
+      ws,
+      { planPath: "plans/c.md", title: "Base" },
+      { dataRoot },
+    );
+    await Promise.all(
+      Array.from({ length: 24 }, (_, i) =>
+        upsertInitiative(
+          ws,
+          {
+            id: initiative.id,
+            planPath: "plans/c.md",
+            title: `Concurrent ${i}`,
+            blurb: `b${i}`,
+          },
+          { dataRoot },
+        ),
+      ),
+    );
+    const path = statePathFor(ws, { dataRoot });
+    const raw = await readFile(path, "utf8");
+    const parsed = JSON.parse(raw);
+    assert.equal(parsed.initiatives.length, 1);
+    assert.match(parsed.initiatives[0].title, /^Concurrent \d+$/);
   } finally {
     await rm(dataRoot, { recursive: true, force: true });
   }

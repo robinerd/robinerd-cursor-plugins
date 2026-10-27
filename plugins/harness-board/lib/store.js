@@ -1,7 +1,14 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import {
   canonicalizeWorkspacePath,
   workspaceIdentityKey,
@@ -118,7 +125,7 @@ export async function loadState(workspacePath, options = {}) {
   let state;
   try {
     const raw = await readFile(path, "utf8");
-    const parsed = JSON.parse(raw);
+    const parsed = parseJsonDocument(raw);
     // Always pin to the canonical load key so saveState cannot redirect.
     state = normalizeState(key, parsed);
   } catch (err) {
@@ -145,7 +152,51 @@ export async function saveState(state, options = {}) {
     workspacePath: key,
     updatedAt: new Date().toISOString(),
   };
-  await writeFile(path, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+  await atomicWriteFile(path, `${JSON.stringify(next, null, 2)}\n`);
+}
+
+/**
+ * Parse JSON; if a concurrent non-atomic write left trailing junk after the
+ * first value, keep the leading document (V8 reports the junk position).
+ * @param {string} raw
+ * @returns {unknown}
+ */
+export function parseJsonDocument(raw) {
+  try {
+    return JSON.parse(raw);
+  } catch (err) {
+    if (!(err instanceof SyntaxError)) throw err;
+    const match = /at position (\d+)/i.exec(err.message);
+    if (!match) throw err;
+    const pos = Number(match[1]);
+    if (!Number.isFinite(pos) || pos <= 0 || pos >= raw.length) throw err;
+    return JSON.parse(raw.slice(0, pos));
+  }
+}
+
+/**
+ * Write via temp file + rename so readers never see a torn or dual document.
+ * @param {string} filePath
+ * @param {string} contents
+ * @returns {Promise<void>}
+ */
+export async function atomicWriteFile(filePath, contents) {
+  const dir = dirname(filePath);
+  const tmp = join(
+    dir,
+    `.${basename(filePath)}.${process.pid}.${randomUUID()}.tmp`,
+  );
+  await writeFile(tmp, contents, "utf8");
+  try {
+    if (process.platform === "win32") {
+      // Windows rename cannot replace an existing destination.
+      await rm(filePath, { force: true });
+    }
+    await rename(tmp, filePath);
+  } catch (err) {
+    await rm(tmp, { force: true }).catch(() => {});
+    throw err;
+  }
 }
 
 /**
